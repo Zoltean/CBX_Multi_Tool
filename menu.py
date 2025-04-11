@@ -3,13 +3,19 @@ import logging
 import os
 import sys
 import time
-from typing import Dict, Optional
-from colorama import Fore, Style
 import threading
-from patching import install_file, patch_file
-from network import refresh_shift
+import platform
+import sqlite3
+from sqlite3 import Error
+from typing import Dict, Optional
+from colorama import init, Fore, Style
+
+from config import PROGRAM_TITLE, VPS_API_URL, DRIVES
+from logging_setup import setup_logging
+from network import check_for_updates, fetch_json, refresh_shift
+from utils import is_admin, show_spinner
 from cleanup import cleanup
-from utils import show_spinner
+from patching import install_file, patch_file
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +195,9 @@ def display_menu(title: str, options: Dict, data: Dict, api_handler=None, parent
                 print(f"0. Back")
                 logger.info("Added Back option: 0")
             if title.lower() == "main menu":
+                print(f"H. Check Profiles Health")
                 print(f"R. Refresh Shift")
+                logger.info("Added Check Profiles Health option: H/Р")
                 logger.info("Added Refresh Shift option: R/К")
             print(f"Q. Exit with cleanup")
             logger.info("Added Exit with cleanup option: Q/Й")
@@ -208,8 +216,13 @@ def display_menu(title: str, options: Dict, data: Dict, api_handler=None, parent
 
             if choice.lower() in ["q", "й"]:
                 logger.info("User chose to exit with cleanup")
-                cleanup(data, api_handler)  # Вызываем cleanup только здесь
+                cleanup(data, api_handler)
                 sys.exit(0)
+
+            if title.lower() == "main menu" and choice.lower() in ["h", "р"]:
+                logger.info("User chose to check profiles health")
+                check_cash_profiles(data, api_handler)
+                continue
 
             if title.lower() == "main menu" and choice.lower() in ["r", "к"]:
                 logger.info("User chose to refresh shift")
@@ -241,7 +254,7 @@ def display_menu(title: str, options: Dict, data: Dict, api_handler=None, parent
                 if 1 <= choice_int <= len(ordered_items):
                     key, value = ordered_items[choice_int - 1]
                     logger.info(f"Selected: {key}")
-                    if callable(value):  # Если это функция (хотя теперь тут не будет cleanup)
+                    if callable(value):
                         value()
                     elif "url" in value:
                         paylink_patch_data = None
@@ -285,3 +298,138 @@ def display_menu(title: str, options: Dict, data: Dict, api_handler=None, parent
             time.sleep(2)
             stop_event.set()
             spinner_thread.join()
+
+def check_cash_profiles(data: Dict, api_handler=None):
+    logger.info("Starting cash profiles health check")
+    print(f"{Fore.CYAN}Checking cash profiles...{Style.RESET_ALL}")
+
+    stop_event = threading.Event()
+    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Searching profiles"))
+    spinner_thread.start()
+
+    try:
+        target_folder = "checkbox.kasa.manager"
+        profiles_dir = None
+        for drive in DRIVES:
+            path = f"{drive}\\{target_folder}"
+            profiles_path = os.path.join(path, "profiles")
+            if os.path.exists(profiles_path):
+                profiles_dir = profiles_path
+                break
+
+        if not profiles_dir:
+            logger.error(f"Profiles folder not found for {target_folder}")
+            print(f"{Fore.RED}Error: Profiles folder not found on any drive!{Style.RESET_ALL}")
+            stop_event.set()
+            spinner_thread.join()
+            input("Press Enter to continue...")
+            return
+
+        profile_folders = [f for f in os.listdir(profiles_dir) if os.path.isdir(os.path.join(profiles_dir, f))]
+        if not profile_folders:
+            logger.error(f"No profile folders found in {profiles_dir}")
+            print(f"{Fore.RED}Error: No profile folders found in {profiles_dir}!{Style.RESET_ALL}")
+            stop_event.set()
+            spinner_thread.join()
+            input("Press Enter to continue...")
+            return
+
+        logger.info(f"Found profiles: {profile_folders}")
+        stop_event.set()
+        spinner_thread.join()
+
+        for profile in profile_folders:
+            profile_path = os.path.join(profiles_dir, profile)
+            db_path = os.path.join(profile_path, "agent.db")
+            version = "Unknown"
+
+            try:
+                if os.path.exists(os.path.join(profile_path, "version")):
+                    with open(os.path.join(profile_path, "version"), "r", encoding="utf-8") as f:
+                        version = f.read().strip()
+            except Exception as e:
+                logger.error(f"Failed to read version file for {profile}: {e}")
+
+            health = "BAD"
+            trans_status = "ERROR"
+            shift_status = "OPENED"
+            conn = None
+            try:
+                conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
+                cursor = conn.cursor()
+
+                cursor.execute("PRAGMA integrity_check;")
+                result = cursor.fetchone()[0]
+                if result == "ok":
+                    health = "OK"
+                    logger.info(f"Database {db_path} is healthy")
+
+                    cursor.execute("SELECT status FROM transactions;")
+                    statuses = [row[0] for row in cursor.fetchall()]
+                    if not statuses:
+                        trans_status = "EMPTY"
+                    elif any(s == "ERROR" for s in statuses):
+                        trans_status = "ERROR"
+                    elif any(s == "PENDING" for s in statuses):
+                        trans_status = "PENDING"
+                    else:
+                        trans_status = "DONE"
+                    logger.info(f"Transactions status for {profile}: {trans_status}")
+
+                    cursor.execute("SELECT status FROM shifts WHERE id = (SELECT MAX(id) FROM shifts);")
+                    shift_result = cursor.fetchone()
+                    if shift_result:
+                        shift_status = shift_result[0].upper()
+                        logger.info(f"Shift status for {profile}: {shift_status}")
+                    else:
+                        shift_status = "CLOSED"
+
+                cursor.close()
+            except Error as e:
+                logger.error(f"Failed to connect or query {db_path}: {e}")
+            finally:
+                if conn:
+                    conn.close()
+                    logger.debug(f"Closed connection to {db_path}")
+                    time.sleep(0.1)  # Задержка для освобождения файла
+
+            # Вывод результата
+            health_color = Fore.GREEN if health == "OK" else Fore.RED
+            trans_status_color = Fore.GREEN if trans_status in ["DONE", "EMPTY"] else Fore.RED
+            shift_status_color = Fore.GREEN if shift_status == "CLOSED" else Fore.RED
+            output = (
+                f"{Fore.CYAN}{profile}{Style.RESET_ALL} "
+                f"Health: {health_color}{health}{Style.RESET_ALL} | "
+                f"{trans_status_color}{trans_status}{Style.RESET_ALL} | "
+                f"{shift_status_color}{shift_status}{Style.RESET_ALL} "
+                f"v{version}"
+            )
+            print(output)
+            logger.info(f"Profile check result: {output}")
+
+            # Тест переименования
+            try:
+                os.rename(db_path, db_path + ".test")
+                os.rename(db_path + ".test", db_path)
+                logger.info(f"Successfully renamed {db_path} and back - no lock detected")
+            except OSError as e:
+                logger.error(f"Failed to rename {db_path}: {e} - database is locked")
+
+        if api_handler:
+            api_handler.flush()
+
+        print(f"{Fore.GREEN}Check completed!{Style.RESET_ALL}")
+        input("Press Enter to continue...")
+
+    except Exception as e:
+        logger.error(f"Unexpected error in check_cash_profiles: {e}")
+        print(f"{Fore.RED}Unexpected error: {e}{Style.RESET_ALL}")
+        if 'stop_event' in locals():
+            stop_event.set()
+            spinner_thread.join()
+        input("Press Enter to continue...")
+
+if __name__ == "__main__":
+    API_HANDLER = setup_logging()
+    from main import main
+    main(API_HANDLER)
