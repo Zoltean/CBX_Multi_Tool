@@ -13,7 +13,7 @@ from utils import show_spinner
 
 logger = logging.getLogger(__name__)
 
-def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Dict] = None,
+def display_menu(title: str, options: Dict, data: Dict, api_handler=None, parent_menu: Optional[Dict] = None,
                  update_available: bool = False, download_url: str = ""):
     logger.info(f"Rendering menu: {title}")
     while True:
@@ -205,14 +205,17 @@ def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Di
             print("Select an option:")
             choice = input("")
             logger.info(f"User input: {choice}")
+
             if choice.lower() in ["q", "й"]:
                 logger.info("User chose to exit with cleanup")
-                cleanup(data)
+                cleanup(data, api_handler)  # Вызываем cleanup только здесь
                 sys.exit(0)
+
             if title.lower() == "main menu" and choice.lower() in ["r", "к"]:
                 logger.info("User chose to refresh shift")
                 refresh_shift()
                 continue
+
             if title.lower() == "main menu" and choice.lower() in ["u", "г"] and update_available:
                 logger.info("User chose to download update")
                 print(f"{Fore.CYAN}Opening download link in browser...{Style.RESET_ALL}")
@@ -229,7 +232,7 @@ def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Di
                 stop_event.set()
                 spinner_thread.join()
                 continue
-                continue
+
             try:
                 choice_int = int(choice)
                 if choice_int == 0 and parent_menu:
@@ -238,7 +241,9 @@ def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Di
                 if 1 <= choice_int <= len(ordered_items):
                     key, value = ordered_items[choice_int - 1]
                     logger.info(f"Selected: {key}")
-                    if "url" in value:
+                    if callable(value):  # Если это функция (хотя теперь тут не будет cleanup)
+                        value()
+                    elif "url" in value:
                         paylink_patch_data = None
                         if "paylink" in key.lower() and "dev" in title.lower():
                             paylink_patch_data = data["dev"]["paylink"][-1]
@@ -250,8 +255,9 @@ def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Di
                                     is_rro_agent or is_paylink) else "Checkbox PayLink (Beta)" if is_paylink else "checkbox.kasa.manager",
                                    data, is_rro_agent, is_paylink)
                     else:
-                        display_menu(key.capitalize(), value, data, {"title": title, "options": options},
-                                     update_available, download_url)
+                        display_menu(key.capitalize(), value, data, api_handler=api_handler,
+                                     parent_menu={"title": title, "options": options},
+                                     update_available=update_available, download_url=download_url)
                 else:
                     logger.warning(f"Invalid option: {choice_int}")
                     print(f"{Fore.RED}[ERROR] Invalid option!{Style.RESET_ALL}")
@@ -274,7 +280,7 @@ def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Di
             logger.error(f"Unexpected error in display_menu: {e}")
             print(f"{Fore.RED}Unexpected error in menu: {e}{Style.RESET_ALL}")
             stop_event = threading.Event()
-            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid option"))
+            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Menu error"))
             spinner_thread.start()
             time.sleep(2)
             stop_event.set()

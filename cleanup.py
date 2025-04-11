@@ -12,11 +12,10 @@ from tqdm import tqdm
 from colorama import Fore, Style
 
 from utils import find_all_processes_by_name, show_spinner
-from logging_setup import APILogHandler
 
 logger = logging.getLogger(__name__)
 
-def cleanup(data: Dict):
+def cleanup(data: Dict, api_handler):  # Добавляем api_handler как аргумент
     logger.info("Starting cleanup (user-initiated)")
     print(f"{Fore.CYAN}Cleaning up...{Style.RESET_ALL}")
     files_to_delete = []
@@ -93,20 +92,31 @@ def cleanup(data: Dict):
                     logger.debug(f"File {file} does not exist, skipping")
                     pbar.update(1)
 
-        from main import API_HANDLER
-        if API_HANDLER:
+        if api_handler:  # Используем переданный api_handler
             logger.info("Flushing remaining logs before cleanup exit")
-            API_HANDLER.flush()
+            api_handler.flush()
+
+        # Ждём завершения всех потоков
+        for thread in threading.enumerate():
+            if thread is not threading.current_thread() and thread.is_alive():
+                logger.info(f"Waiting for thread {thread.name} to finish")
+                thread.join(timeout=2.0)
 
         logger.info("Scheduling script self-deletion via batch file")
         print(f"{Fore.GREEN}Cleanup completed! Scheduling self-deletion...{Style.RESET_ALL}")
 
         exe_path = os.path.abspath(sys.argv[0])
+        if getattr(sys, 'frozen', False):
+            exe_path = os.path.abspath(sys.executable)
+            logger.info(f"Running as frozen executable, adjusted exe_path: {exe_path}")
+        else:
+            logger.info(f"Running as script, exe_path: {exe_path}")
+
         bat_path = os.path.join(os.path.dirname(exe_path), "delete_me.bat")
         with open(bat_path, "w", encoding="utf-8") as bat_file:
             bat_file.write(f"@echo off\n")
             bat_file.write(f":repeat\n")
-            bat_file.write(f"ping 127.0.0.1 -n 2 >nul\n")
+            bat_file.write(f"ping 127.0.0.1 -n 3 >nul\n")
             bat_file.write(f"del /f /q \"{exe_path}\"\n")
             bat_file.write(f"if exist \"{exe_path}\" goto repeat\n")
             bat_file.write(f"del /f /q \"{bat_path}\"\n")
