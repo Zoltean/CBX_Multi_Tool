@@ -219,7 +219,7 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
                 logger.info(f"Successfully launched {kasa_path}")
                 print(f"{Fore.GREEN}Cash register launched successfully!{Style.RESET_ALL}")
                 stop_event = threading.Event()
-                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Cash launched"))
+                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Cash register launched"))
                 spinner_thread.start()
                 time.sleep(5)
                 stop_event.set()

@@ -198,9 +198,9 @@ def display_menu(title: str, options: Dict, data: Dict, api_handler=None, parent
                 print(f"0. Back")
                 logger.info("Added Back option: 0")
             if title.lower() == "main menu":
-                print(f"H. Check Profiles Health")
+                print(f"H. Check Cash register Health")
                 print(f"R. Refresh Shift")
-                logger.info("Added Check Profiles Health option: H/Р")
+                logger.info("Added Check Cash register Health option: H/Р")
                 logger.info("Added Refresh Shift option: R/К")
             print(f"Q. Exit with cleanup")
             logger.info("Added Exit with cleanup option: Q/Й")
@@ -303,17 +303,17 @@ def display_menu(title: str, options: Dict, data: Dict, api_handler=None, parent
             spinner_thread.join()
 
 def check_cash_profiles(data: Dict, api_handler=None):
-    logger.info("Starting cash profiles health check")
+    logger.info("Starting cash register health check")
     while True:  # Зацикливаем для возврата в меню
         os.system("cls")
         print(f"{Fore.CYAN}{'=' * 40}{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}           CHECK PROFILES HEALTH{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}           CHECK CASH REGISTER HEALTH{Style.RESET_ALL}")
         print(f"{Fore.CYAN}{'=' * 40}{Style.RESET_ALL}")
         print()
 
         # Показываем спиннер на время поиска
         stop_event = threading.Event()
-        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Searching profiles"))
+        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Searching cash registers"))
         spinner_thread.start()
 
         try:
@@ -422,13 +422,15 @@ def check_cash_profiles(data: Dict, api_handler=None):
 
             # Выводим профили с номерами
             print(f"{Fore.CYAN}Available profiles:{Style.RESET_ALL}")
+            print()
             for i, (profile, info, _) in enumerate(profiles_info, 1):
                 print(f"{i}. {Fore.WHITE}{profile}{Style.RESET_ALL} {info}")
+            print()
             print(f"0. Back")
             print(f"{Fore.CYAN}{'=' * 40}{Style.RESET_ALL}")
 
             # Запрашиваем выбор пользователя
-            choice = input("Select a profile to restart or 0 to go back: ").strip()
+            choice = input("Select a profile of cash register or 0 to go back: ").strip()
             logger.info(f"User input in profile selection: {choice}")
 
             if choice == "0":
@@ -531,7 +533,7 @@ def check_cash_profiles(data: Dict, api_handler=None):
                         spinner_thread.join()
 
                     # Возвращаемся в меню "H" (continue перезапустит цикл)
-                    print(f"{Fore.GREEN}Returning to profile health check...{Style.RESET_ALL}")
+                    print(f"{Fore.GREEN}Returning to cash register health check...{Style.RESET_ALL}")
                     stop_event = threading.Event()
                     spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Returning"))
                     spinner_thread.start()

@@ -307,6 +307,7 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                 print(f"{Fore.CYAN}           SELECT PROFILE{Style.RESET_ALL}")
                 print(f"{Fore.CYAN}{'=' * 40}{Style.RESET_ALL}")
                 print(f"{Fore.CYAN}Available profiles:{Style.RESET_ALL}")
+                print()
                 for i, profile in enumerate(profiles_info, 1):
                     health_color = Fore.GREEN if profile["health"] == "OK" else Fore.RED
                     trans_color = Fore.GREEN if profile["trans_status"] in ["DONE", "EMPTY"] else Fore.RED
@@ -318,7 +319,9 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                         f"v{profile['version']}"
                     )
                     print(f"{i}. {Fore.CYAN}{profile['name']}{Style.RESET_ALL} {profile_str}")
+                print()  # Пустая строка перед "All profiles"
                 print(f"{len(profile_folders) + 1}. All profiles")
+                print()
                 print(f"0. Back")
                 print(f"Q. Exit with cleanup")
                 print(f"{Fore.CYAN}{'=' * 40}{Style.RESET_ALL}")
@@ -464,16 +467,6 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                             stop_event.set()
                             spinner_thread.join()
                             continue
-                        if selected_profile["shift_status"] == "OPENED":
-                            logger.error(f"Cannot patch {selected_profile['name']}: Shift is OPENED")
-                            print(f"{Fore.RED}Error: Cannot patch {selected_profile['name']} - Shift is OPENED!{Style.RESET_ALL}")
-                            stop_event = threading.Event()
-                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Patch aborted"))
-                            spinner_thread.start()
-                            time.sleep(2)
-                            stop_event.set()
-                            spinner_thread.join()
-                            continue
                         target_dirs = [selected_profile["path"]]
                         break
                     elif choice_int == len(profile_folders) + 1:
@@ -481,16 +474,6 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                             if profile["health"] == "BAD":
                                 logger.error(f"Cannot patch all profiles: {profile['name']} has corrupted database")
                                 print(f"{Fore.RED}Error: Cannot patch all profiles - {profile['name']} has corrupted database!{Style.RESET_ALL}")
-                                stop_event = threading.Event()
-                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Patch aborted"))
-                                spinner_thread.start()
-                                time.sleep(2)
-                                stop_event.set()
-                                spinner_thread.join()
-                                return False
-                            if profile["shift_status"] == "OPENED":
-                                logger.error(f"Cannot patch all profiles: {profile['name']} has OPENED shift")
-                                print(f"{Fore.RED}Error: Cannot patch all profiles - {profile['name']} has OPENED shift!{Style.RESET_ALL}")
                                 stop_event = threading.Event()
                                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Patch aborted"))
                                 spinner_thread.start()
@@ -550,7 +533,7 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                     print(f" - PID: {proc.pid}")
                 print(f"{Fore.RED}To proceed with patching, this process must be closed.{Style.RESET_ALL}")
                 choice = input(f"Close cash register processes? (Y/N): ").strip().lower()
-                logger.info(f"User prompted to kill cash processes, response: {choice}")
+                logger.info(f"User prompted to kill cash register processes, response: {choice}")
                 if choice == "y":
                     print(f"{Fore.YELLOW}Stopping all cash register processes...{Style.RESET_ALL}")
                     for proc in cash_processes:
