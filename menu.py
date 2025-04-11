@@ -5,10 +5,11 @@ import sys
 import time
 from typing import Dict, Optional
 from colorama import Fore, Style
-
+import threading
 from patching import install_file, patch_file
 from network import refresh_shift
 from cleanup import cleanup
+from utils import show_spinner
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,12 @@ def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Di
             if not ordered_items:
                 logger.warning("No items to display in menu")
                 print(f"{Fore.RED}No options available!{Style.RESET_ALL}")
+                stop_event = threading.Event()
+                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "No options"))
+                spinner_thread.start()
                 time.sleep(2)
+                stop_event.set()
+                spinner_thread.join()
                 return
 
             current_index = 1
@@ -216,7 +222,13 @@ def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Di
                 except Exception as e:
                     logger.error(f"Failed to open browser for update: {e}")
                     print(f"{Fore.RED}Failed to open browser: {e}{Style.RESET_ALL}")
+                stop_event = threading.Event()
+                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Opening browser"))
+                spinner_thread.start()
                 time.sleep(2)
+                stop_event.set()
+                spinner_thread.join()
+                continue
                 continue
             try:
                 choice_int = int(choice)
@@ -243,12 +255,27 @@ def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Di
                 else:
                     logger.warning(f"Invalid option: {choice_int}")
                     print(f"{Fore.RED}[ERROR] Invalid option!{Style.RESET_ALL}")
+                    stop_event = threading.Event()
+                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid option"))
+                    spinner_thread.start()
                     time.sleep(2)
+                    stop_event.set()
+                    spinner_thread.join()
             except ValueError:
                 logger.warning(f"Invalid input: {choice}")
                 print(f"{Fore.RED}[ERROR] Invalid option!{Style.RESET_ALL}")
+                stop_event = threading.Event()
+                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid option"))
+                spinner_thread.start()
                 time.sleep(2)
+                stop_event.set()
+                spinner_thread.join()
         except Exception as e:
             logger.error(f"Unexpected error in display_menu: {e}")
             print(f"{Fore.RED}Unexpected error in menu: {e}{Style.RESET_ALL}")
+            stop_event = threading.Event()
+            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid option"))
+            spinner_thread.start()
             time.sleep(2)
+            stop_event.set()
+            spinner_thread.join()

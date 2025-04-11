@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 import logging
 import os
-import time  # Добавлен импорт time
+import time
+import threading
 from colorama import Fore, Style
 
 from config import PROGRAM_TITLE, VPS_API_URL
 from logging_setup import setup_logging
 from network import check_for_updates, fetch_json
 from menu import display_menu
-from utils import is_admin
+from utils import is_admin, show_spinner
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +21,15 @@ def main():
         if not is_admin():
             print(
                 f"{Fore.YELLOW}Warning: {PROGRAM_TITLE} is not running as administrator, some features will be unavailable.{Style.RESET_ALL}")
-            time.sleep(3)  # Теперь time определен
+            stop_event = threading.Event()
+            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Checking privileges"))
+            spinner_thread.start()
+            time.sleep(3)
+            stop_event.set()
+            spinner_thread.join()
         else:
             print(f"{Fore.GREEN}Running with admin privileges.{Style.RESET_ALL}")
-            time.sleep(1)  # Теперь time определен
+            time.sleep(1)
 
         update_available, download_url = check_for_updates()
 
@@ -98,5 +104,5 @@ def main():
         input("Press Enter to exit...")
 
 if __name__ == "__main__":
-    setup_logging()
+    API_HANDLER = setup_logging()
     main()

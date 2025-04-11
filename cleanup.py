@@ -4,11 +4,14 @@ import os
 import sys
 import subprocess
 import time
+import threading
 from typing import Dict
+
+import psutil
 from tqdm import tqdm
 from colorama import Fore, Style
 
-from utils import find_all_processes_by_name
+from utils import find_all_processes_by_name, show_spinner
 from logging_setup import APILogHandler
 
 logger = logging.getLogger(__name__)
@@ -54,7 +57,12 @@ def cleanup(data: Dict):
                         proc.kill()
                         logger.info(f"Killed process {process_name} (PID: {proc.pid})")
                         print(f"{Fore.GREEN}Terminated {process_name} (PID: {proc.pid}){Style.RESET_ALL}")
+                        stop_event = threading.Event()
+                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process terminated"))
+                        spinner_thread.start()
                         time.sleep(0.5)
+                        stop_event.set()
+                        spinner_thread.join()
                     except psutil.NoSuchProcess:
                         logger.warning(f"Process {process_name} (PID: {proc.pid}) already terminated")
                     except psutil.AccessDenied:
@@ -85,7 +93,6 @@ def cleanup(data: Dict):
                     logger.debug(f"File {file} does not exist, skipping")
                     pbar.update(1)
 
-        # Импортируем API_HANDLER из logging_setup как глобальную переменную
         from main import API_HANDLER
         if API_HANDLER:
             logger.info("Flushing remaining logs before cleanup exit")
@@ -94,7 +101,6 @@ def cleanup(data: Dict):
         logger.info("Scheduling script self-deletion via batch file")
         print(f"{Fore.GREEN}Cleanup completed! Scheduling self-deletion...{Style.RESET_ALL}")
 
-        # Определяем путь к исполняемому файлу (если запущен как .exe) или скрипту
         exe_path = os.path.abspath(sys.argv[0])
         bat_path = os.path.join(os.path.dirname(exe_path), "delete_me.bat")
         with open(bat_path, "w", encoding="utf-8") as bat_file:

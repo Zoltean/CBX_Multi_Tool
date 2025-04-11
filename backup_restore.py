@@ -1,15 +1,19 @@
 # -*- coding: utf-8 -*-
 import os
+import subprocess
 import time
 import zipfile
 import shutil
 import logging
+import threading
 from datetime import datetime
 from typing import Optional
+
+import psutil
 from tqdm import tqdm
 from colorama import Fore, Style
 
-from utils import find_process_by_path, find_all_processes_by_name, manage_processes
+from utils import find_process_by_path, find_all_processes_by_name, manage_processes, show_spinner
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +35,22 @@ def create_backup(target_dir: str) -> Optional[str]:
                         pbar.update(1)
         logger.info(f"Backup created: {backup_path}")
         print(f"{Fore.GREEN}Backup created: {backup_path}{Style.RESET_ALL}")
+        stop_event = threading.Event()
+        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Backup created"))
+        spinner_thread.start()
+        time.sleep(2)
+        stop_event.set()
+        spinner_thread.join()
         return backup_path
     except Exception as e:
         logger.error(f"Failed to create backup: {e}")
         print(f"{Fore.RED}Failed to create backup: {e}{Style.RESET_ALL}")
+        stop_event = threading.Event()
+        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Backup failed"))
+        spinner_thread.start()
+        time.sleep(2)
+        stop_event.set()
+        spinner_thread.join()
         return None
 
 def delete_backup(backup_path: str) -> bool:
@@ -44,10 +60,22 @@ def delete_backup(backup_path: str) -> bool:
         os.remove(backup_path)
         logger.info(f"Successfully deleted backup: {backup_path}")
         print(f"{Fore.GREEN}Backup {os.path.basename(backup_path)} deleted successfully!{Style.RESET_ALL}")
+        stop_event = threading.Event()
+        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Backup deleted"))
+        spinner_thread.start()
+        time.sleep(2)
+        stop_event.set()
+        spinner_thread.join()
         return True
     except Exception as e:
         logger.error(f"Failed to delete backup {backup_path}: {e}")
         print(f"{Fore.RED}Failed to delete backup {os.path.basename(backup_path)}: {e}{Style.RESET_ALL}")
+        stop_event = threading.Event()
+        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Delete failed"))
+        spinner_thread.start()
+        time.sleep(2)
+        stop_event.set()
+        spinner_thread.join()
         return False
 
 def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = False,
@@ -91,6 +119,12 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
                     proc.kill()
                     logger.info(f"Killed {proc.info['name']} (PID: {proc.pid})")
                     print(f"{Fore.GREEN}Killed {proc.info['name']} (PID: {proc.pid}).{Style.RESET_ALL}")
+                    stop_event = threading.Event()
+                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process killed"))
+                    spinner_thread.start()
+                    time.sleep(1)
+                    stop_event.set()
+                    spinner_thread.join()
                 except psutil.NoSuchProcess:
                     logger.warning(f"{proc.info['name']} (PID: {proc.pid}) already terminated")
                 except Exception as e:
@@ -99,16 +133,27 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
         else:
             logger.info("User declined to kill processes, aborting restore")
             print(f"{Fore.RED}Restoration aborted by user.{Style.RESET_ALL}")
+            stop_event = threading.Event()
+            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Restore aborted"))
+            spinner_thread.start()
             time.sleep(2)
+            stop_event.set()
+            spinner_thread.join()
             return False
 
         if is_rro_agent and cash_running and manager_running:
-            print(f"{Fore.YELLOW}Freezing all manager processes...{Style.RESET_ALL}")  # Исправленная строка
+            print(f"{Fore.YELLOW}Freezing all manager processes...{Style.RESET_ALL}")
             for proc in manager_processes:
                 try:
                     proc.suspend()
                     logger.info(f"Suspended kasa_manager.exe (PID: {proc.pid})")
                     print(f"{Fore.GREEN}Suspended kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                    stop_event = threading.Event()
+                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process suspended"))
+                    spinner_thread.start()
+                    time.sleep(1)
+                    stop_event.set()
+                    spinner_thread.join()
                 except psutil.NoSuchProcess:
                     logger.warning(f"kasa_manager.exe (PID: {proc.pid}) already terminated")
                 except Exception as e:
@@ -134,7 +179,12 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
     except Exception as e:
         logger.error(f"Failed to remove files from {target_dir}: {e}")
         print(f"{Fore.RED}Failed to clear {target_dir}: {e}{Style.RESET_ALL}")
+        stop_event = threading.Event()
+        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Clear failed"))
+        spinner_thread.start()
         time.sleep(2)
+        stop_event.set()
+        spinner_thread.join()
         return False
 
     try:
@@ -150,7 +200,12 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
     except Exception as e:
         logger.error(f"Failed to restore from backup: {e}")
         print(f"{Fore.RED}Failed to restore from backup: {e}{Style.RESET_ALL}")
+        stop_event = threading.Event()
+        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Restore failed"))
+        spinner_thread.start()
         time.sleep(2)
+        stop_event.set()
+        spinner_thread.join()
         return False
 
     try:
@@ -163,7 +218,12 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
                 subprocess.Popen(cmd, cwd=target_dir, shell=True)
                 logger.info(f"Successfully launched {kasa_path}")
                 print(f"{Fore.GREEN}Cash register launched successfully!{Style.RESET_ALL}")
+                stop_event = threading.Event()
+                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Cash launched"))
+                spinner_thread.start()
                 time.sleep(5)
+                stop_event.set()
+                spinner_thread.join()
             else:
                 logger.warning(f"checkbox_kasa.exe not found in {target_dir}")
                 print(f"{Fore.YELLOW}checkbox_kasa.exe not found in {target_dir}, skipping launch{Style.RESET_ALL}")
@@ -200,6 +260,12 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
                 proc.resume()
                 logger.info(f"Resumed kasa_manager.exe (PID: {proc.pid})")
                 print(f"{Fore.GREEN}Resumed kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                stop_event = threading.Event()
+                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process resumed"))
+                spinner_thread.start()
+                time.sleep(1)
+                stop_event.set()
+                spinner_thread.join()
             except psutil.NoSuchProcess:
                 logger.warning(f"kasa_manager.exe (PID: {proc.pid}) already terminated")
                 print(f"{Fore.YELLOW}kasa_manager.exe (PID: {proc.pid}) already terminated{Style.RESET_ALL}")
@@ -207,5 +273,10 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
                 logger.error(f"Failed to resume kasa_manager.exe (PID: {proc.pid}): {e}")
                 print(f"{Fore.RED}Failed to resume kasa_manager.exe (PID: {proc.pid}): {e}{Style.RESET_ALL}")
 
+    stop_event = threading.Event()
+    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Restore completed"))
+    spinner_thread.start()
     time.sleep(2)
+    stop_event.set()
+    spinner_thread.join()
     return True

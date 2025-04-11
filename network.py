@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
 import os
 import logging
+import threading
+
 import requests
 import time
 from typing import Dict, Optional, Tuple
 from tqdm import tqdm
 from ping3 import ping
 from colorama import Fore, Style
-
+from utils import show_spinner
 from config import VPS_VERSION_URL
 
 logger = logging.getLogger(__name__)
@@ -61,7 +63,12 @@ def fetch_json(url: str) -> Optional[Dict]:
             if "error" in data:
                 logger.error(f"Server returned an error: {data['error']}")
                 print(f"{Fore.RED}Server error: {data['error']}{Style.RESET_ALL}")
+                stop_event = threading.Event()
+                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Server error"))
+                spinner_thread.start()
                 time.sleep(5)
+                stop_event.set()
+                spinner_thread.join()
                 return None
             logger.debug(f"Fetched data: {data}")
             pbar.update(100)
@@ -70,13 +77,24 @@ def fetch_json(url: str) -> Optional[Dict]:
     except requests.RequestException as e:
         logger.error(f"Failed to fetch JSON: {e}")
         print(f"{Fore.RED}Failed to fetch data: {e}{Style.RESET_ALL}")
+        stop_event = threading.Event()
+        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Fetch failed"))
+        spinner_thread.start()
         time.sleep(5)
+        stop_event.set()
+        spinner_thread.join()
         return None
     except Exception as e:
         logger.error(f"Unexpected error in fetch_json: {e}")
         print(f"{Fore.RED}Unexpected error fetching data: {e}{Style.RESET_ALL}")
+        stop_event = threading.Event()
+        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Fetch error"))
+        spinner_thread.start()
         time.sleep(5)
+        stop_event.set()
+        spinner_thread.join()
         return None
+
 
 def download_file(url: str, filename: str) -> bool:
     logger.info(f"Checking existence of {filename}")
@@ -88,27 +106,52 @@ def download_file(url: str, filename: str) -> bool:
 
         logger.info(f"Downloading {filename} from {url}")
         print(f"{Fore.CYAN}Downloading {filename}...{Style.RESET_ALL}")
-        with requests.get(url, stream=True, timeout=10) as r:
-            r.raise_for_status()
-            total_size = int(r.headers.get('content-length', 0)) or (55 * 1024 * 1024)
-            with open(filename, 'wb') as f:
-                with tqdm(total=total_size, unit='B', unit_scale=True, desc="Progress",
-                          bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}]") as pbar:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                        pbar.update(len(chunk))
-        logger.info(f"Downloaded {filename}")
-        print(f"{Fore.GREEN}Downloaded {filename} successfully!{Style.RESET_ALL}")
-        return True
-    except requests.RequestException as e:
-        logger.error(f"Download failed: {e}")
-        print(f"{Fore.RED}Download failed: {e}{Style.RESET_ALL}")
-        time.sleep(5)
-        return False
+
+        max_retries = 3
+        retry_delay = 5
+        for attempt in range(max_retries):
+            try:
+                with requests.get(url, stream=True, timeout=10) as r:
+                    r.raise_for_status()
+                    total_size = int(r.headers.get('content-length', 0)) or (55 * 1024 * 1024)
+                    with open(filename, 'wb') as f:
+                        with tqdm(total=total_size, unit='B', unit_scale=True, desc="Progress",
+                                  bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}]") as pbar:
+                            for chunk in r.iter_content(chunk_size=8192):
+                                f.write(chunk)
+                                pbar.update(len(chunk))
+                logger.info(f"Downloaded {filename}")
+                print(f"{Fore.GREEN}Downloaded {filename} successfully!{Style.RESET_ALL}")
+                return True
+            except requests.RequestException as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Download failed (attempt {attempt + 1}/{max_retries}): {e}. Retrying...")
+                    print(f"{Fore.YELLOW}Download failed: {e}. Retrying...{Style.RESET_ALL}")
+                    stop_event = threading.Event()
+                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Retrying download"))
+                    spinner_thread.start()
+                    time.sleep(retry_delay)
+                    stop_event.set()
+                    spinner_thread.join()
+                else:
+                    logger.error(f"Download failed after {max_retries} attempts: {e}")
+                    print(f"{Fore.RED}Download failed after {max_retries} attempts: {e}{Style.RESET_ALL}")
+                    stop_event = threading.Event()
+                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Download failed"))
+                    spinner_thread.start()
+                    time.sleep(5)
+                    stop_event.set()
+                    spinner_thread.join()
+                    return False
     except Exception as e:
         logger.error(f"Unexpected error in download_file: {e}")
         print(f"{Fore.RED}Unexpected error downloading file: {e}{Style.RESET_ALL}")
+        stop_event = threading.Event()
+        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Download error"))
+        spinner_thread.start()
         time.sleep(5)
+        stop_event.set()
+        spinner_thread.join()
         return False
 
 def refresh_shift():
@@ -133,31 +176,61 @@ def refresh_shift():
                 logger.info(f"Successful response from {url}")
                 print(f"{Fore.GREEN}Shift refreshed on port {port}{Style.RESET_ALL}")
                 print(f"{Fore.GREEN}Shift was refreshed successfully{Style.RESET_ALL}")
+                stop_event = threading.Event()
+                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Shift refreshed"))
+                spinner_thread.start()
                 time.sleep(2)
+                stop_event.set()
+                spinner_thread.join()
                 return True
             else:
                 logger.warning(f"Unexpected response from {url}: {data}")
                 print(f"{Fore.RED}Failed to refresh shift: unexpected response from port {port}{Style.RESET_ALL}")
+                stop_event = threading.Event()
+                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Shift failed"))
+                spinner_thread.start()
                 time.sleep(2)
+                stop_event.set()
+                spinner_thread.join()
                 return False
         else:
             logger.warning(f"Failed with status code {response.status_code} from {url}")
             print(
                 f"{Fore.RED}Failed to refresh shift: received status {response.status_code} from port {port}{Style.RESET_ALL}")
+            stop_event = threading.Event()
+            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Shift failed"))
+            spinner_thread.start()
             time.sleep(2)
+            stop_event.set()
+            spinner_thread.join()
             return False
     except ValueError as e:
         logger.error(f"Invalid port input: {e}")
         print(f"{Fore.RED}Error: Invalid port number ({e}){Style.RESET_ALL}")
+        stop_event = threading.Event()
+        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid port"))
+        spinner_thread.start()
         time.sleep(2)
+        stop_event.set()
+        spinner_thread.join()
         return False
     except requests.RequestException as e:
         logger.error(f"Failed to connect to port: {e}")
         print(f"{Fore.RED}Failed to refresh shift: could not connect to port ({e}){Style.RESET_ALL}")
+        stop_event = threading.Event()
+        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Connection failed"))
+        spinner_thread.start()
         time.sleep(2)
+        stop_event.set()
+        spinner_thread.join()
         return False
     except Exception as e:
         logger.error(f"Unexpected error in refresh_shift: {e}")
         print(f"{Fore.RED}Unexpected error refreshing shift: {e}{Style.RESET_ALL}")
+        stop_event = threading.Event()
+        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Shift error"))
+        spinner_thread.start()
         time.sleep(2)
+        stop_event.set()
+        spinner_thread.join()
         return False

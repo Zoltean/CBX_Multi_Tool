@@ -2,13 +2,25 @@
 import ctypes
 import logging
 import os
-import psutil
-import subprocess
+import time
 import threading
+import itertools
+import sys
 from typing import List, Optional
+
+import psutil
 from colorama import Fore, Style
 
 logger = logging.getLogger(__name__)
+
+def show_spinner(stop_event: threading.Event, message: str = "Processing") -> None:
+    spinner = itertools.cycle(['-', '/', '|', '\\'])
+    while not stop_event.is_set():
+        sys.stdout.write(f"\r{Fore.CYAN}{message} {next(spinner)}{Style.RESET_ALL}")
+        sys.stdout.flush()
+        time.sleep(0.1)
+    sys.stdout.write(f"\r{Fore.GREEN}{message} Done!{Style.RESET_ALL}\n")
+    sys.stdout.flush()
 
 def is_admin() -> bool:
     logger.info("Checking admin privileges")
@@ -78,7 +90,12 @@ def manage_processes(processes_to_kill: List[str], target_dirs: List[str],
                                 process.kill()
                                 logger.info(f"Killed {proc_name} (PID: {process.pid})")
                                 print(f"{Style.RESET_ALL}{Fore.GREEN}Process {proc_name} closed.{Style.RESET_ALL}")
+                                stop_event = threading.Event()
+                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Closing process"))
+                                spinner_thread.start()
                                 time.sleep(1)
+                                stop_event.set()
+                                spinner_thread.join()
                             except psutil.NoSuchProcess:
                                 logger.warning(f"{proc_name} already terminated")
                             except Exception as e:
@@ -91,7 +108,12 @@ def manage_processes(processes_to_kill: List[str], target_dirs: List[str],
                             process.kill()
                             logger.info(f"Killed {proc_name} (PID: {process.pid})")
                             print(f"{Style.RESET_ALL}{Fore.GREEN}Process {proc_name} closed.{Style.RESET_ALL}")
+                            stop_event = threading.Event()
+                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Closing process"))
+                            spinner_thread.start()
                             time.sleep(1)
+                            stop_event.set()
+                            spinner_thread.join()
                         except psutil.NoSuchProcess:
                             logger.warning(f"{proc_name} already terminated")
                         except Exception as e:
