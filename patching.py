@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import logging
 import os
+import sqlite3
+from sqlite3 import Error
 import subprocess
 import sys
 import time
@@ -229,14 +231,93 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                 spinner_thread.join()
                 return False
 
+            # Собираем информацию о профилях
+            profiles_info = []
+            for profile in profile_folders:
+                profile_path = os.path.join(profiles_dir, profile)
+                db_path = os.path.join(profile_path, "agent.db")
+                version = "Unknown"
+
+                try:
+                    if os.path.exists(os.path.join(profile_path, "version")):
+                        with open(os.path.join(profile_path, "version"), "r", encoding="utf-8") as f:
+                            version = f.read().strip()
+                except Exception as e:
+                    logger.error(f"Failed to read version file for {profile}: {e}")
+
+                health = "BAD"
+                trans_status = "ERROR"
+                shift_status = "OPENED"
+                conn = None
+                for attempt in range(3):
+                    try:
+                        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
+                        cursor = conn.cursor()
+
+                        cursor.execute("PRAGMA integrity_check;")
+                        result = cursor.fetchone()[0]
+                        if result == "ok":
+                            health = "OK"
+                            logger.info(f"Database {db_path} is healthy")
+
+                            cursor.execute("SELECT status FROM transactions;")
+                            statuses = [row[0] for row in cursor.fetchall()]
+                            if not statuses:
+                                trans_status = "EMPTY"
+                            elif any(s == "ERROR" for s in statuses):
+                                trans_status = "ERROR"
+                            elif any(s == "PENDING" for s in statuses):
+                                trans_status = "PENDING"
+                            else:
+                                trans_status = "DONE"
+                            logger.info(f"Transactions status for {profile}: {trans_status}")
+
+                            cursor.execute("SELECT status FROM shifts WHERE id = (SELECT MAX(id) FROM shifts);")
+                            shift_result = cursor.fetchone()
+                            if shift_result:
+                                shift_status = shift_result[0].upper()
+                                logger.info(f"Shift status for {profile}: {shift_status}")
+                            else:
+                                logger.debug(f"No shifts found in {profile}")
+                                shift_status = "CLOSED"
+                        break
+                    except Error as e:
+                        logger.warning(f"Attempt {attempt + 1}/3 failed to connect to {db_path}: {e}")
+                        if attempt == 2:
+                            logger.error(f"All attempts failed for {db_path}: {e}")
+                        time.sleep(1)
+                    finally:
+                        if conn:
+                            conn.close()
+                            logger.debug(f"Closed connection to {db_path}")
+                            time.sleep(0.1)
+
+                profiles_info.append({
+                    "name": profile,
+                    "path": profile_path,
+                    "health": health,
+                    "trans_status": trans_status,
+                    "shift_status": shift_status,
+                    "version": version
+                })
+
             while True:
                 os.system("cls")
                 print(f"{Fore.CYAN}{'=' * 40}{Style.RESET_ALL}")
                 print(f"{Fore.CYAN}           SELECT PROFILE{Style.RESET_ALL}")
                 print(f"{Fore.CYAN}{'=' * 40}{Style.RESET_ALL}")
                 print(f"{Fore.CYAN}Available profiles:{Style.RESET_ALL}")
-                for i, folder in enumerate(profile_folders, 1):
-                    print(f"{i}. {folder}")
+                for i, profile in enumerate(profiles_info, 1):
+                    health_color = Fore.GREEN if profile["health"] == "OK" else Fore.RED
+                    trans_color = Fore.GREEN if profile["trans_status"] in ["DONE", "EMPTY"] else Fore.RED
+                    shift_color = Fore.GREEN if profile["shift_status"] == "CLOSED" else Fore.RED
+                    profile_str = (
+                        f"Health: {health_color}{profile['health']}{Style.RESET_ALL} | "
+                        f"{trans_color}{profile['trans_status']}{Style.RESET_ALL} | "
+                        f"{shift_color}{profile['shift_status']}{Style.RESET_ALL} "
+                        f"v{profile['version']}"
+                    )
+                    print(f"{i}. {Fore.CYAN}{profile['name']}{Style.RESET_ALL} {profile_str}")
                 print(f"{len(profile_folders) + 1}. All profiles")
                 print(f"0. Back")
                 print(f"Q. Exit with cleanup")
@@ -372,10 +453,52 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                         spinner_thread.join()
                         return False
                     elif 1 <= choice_int <= len(profile_folders):
-                        target_dirs = [os.path.join(profiles_dir, profile_folders[choice_int - 1])]
+                        selected_profile = profiles_info[choice_int - 1]
+                        if selected_profile["health"] == "BAD":
+                            logger.error(f"Cannot patch {selected_profile['name']}: Database is corrupted (Health: BAD)")
+                            print(f"{Fore.RED}Error: Cannot patch {selected_profile['name']} - Database is corrupted!{Style.RESET_ALL}")
+                            stop_event = threading.Event()
+                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Patch aborted"))
+                            spinner_thread.start()
+                            time.sleep(2)
+                            stop_event.set()
+                            spinner_thread.join()
+                            continue
+                        if selected_profile["shift_status"] == "OPENED":
+                            logger.error(f"Cannot patch {selected_profile['name']}: Shift is OPENED")
+                            print(f"{Fore.RED}Error: Cannot patch {selected_profile['name']} - Shift is OPENED!{Style.RESET_ALL}")
+                            stop_event = threading.Event()
+                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Patch aborted"))
+                            spinner_thread.start()
+                            time.sleep(2)
+                            stop_event.set()
+                            spinner_thread.join()
+                            continue
+                        target_dirs = [selected_profile["path"]]
                         break
                     elif choice_int == len(profile_folders) + 1:
-                        target_dirs = [os.path.join(profiles_dir, f) for f in profile_folders]
+                        for profile in profiles_info:
+                            if profile["health"] == "BAD":
+                                logger.error(f"Cannot patch all profiles: {profile['name']} has corrupted database")
+                                print(f"{Fore.RED}Error: Cannot patch all profiles - {profile['name']} has corrupted database!{Style.RESET_ALL}")
+                                stop_event = threading.Event()
+                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Patch aborted"))
+                                spinner_thread.start()
+                                time.sleep(2)
+                                stop_event.set()
+                                spinner_thread.join()
+                                return False
+                            if profile["shift_status"] == "OPENED":
+                                logger.error(f"Cannot patch all profiles: {profile['name']} has OPENED shift")
+                                print(f"{Fore.RED}Error: Cannot patch all profiles - {profile['name']} has OPENED shift!{Style.RESET_ALL}")
+                                stop_event = threading.Event()
+                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Patch aborted"))
+                                spinner_thread.start()
+                                time.sleep(2)
+                                stop_event.set()
+                                spinner_thread.join()
+                                return False
+                        target_dirs = [profile["path"] for profile in profiles_info]
                         break
                     else:
                         print(f"{Fore.RED}Invalid choice!{Style.RESET_ALL}")
