@@ -23,7 +23,7 @@ from health_check import check_cash_profiles  # Новый импорт
 
 logger = logging.getLogger(__name__)
 
-def display_menu(title: str, options: Dict, data: Dict, api_handler=None, parent_menu: Optional[Dict] = None,
+def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Dict] = None,
                  update_available: bool = False, download_url: str = ""):
     logger.info(f"Rendering menu: {title}")
     while True:
@@ -220,12 +220,12 @@ def display_menu(title: str, options: Dict, data: Dict, api_handler=None, parent
 
             if choice.lower() in ["q", "й"]:
                 logger.info("User chose to exit with cleanup")
-                cleanup(data, api_handler)
+                cleanup(data)
                 sys.exit(0)
 
             if title.lower() == "main menu" and choice.lower() in ["h", "р"]:
                 logger.info("User chose to check profiles health")
-                check_cash_profiles(data, api_handler)  # Вызов из health_check.py
+                check_cash_profiles(data)  # Вызов из health_check.py
                 continue
 
             if title.lower() == "main menu" and choice.lower() in ["r", "к"]:
@@ -272,7 +272,7 @@ def display_menu(title: str, options: Dict, data: Dict, api_handler=None, parent
                                     is_rro_agent or is_paylink) else "Checkbox PayLink (Beta)" if is_paylink else "checkbox.kasa.manager",
                                    data, is_rro_agent, is_paylink)
                     else:
-                        display_menu(key.capitalize(), value, data, api_handler=api_handler,
+                        display_menu(key.capitalize(), value, data,
                                      parent_menu={"title": title, "options": options},
                                      update_available=update_available, download_url=download_url)
                 else:
@@ -304,6 +304,6 @@ def display_menu(title: str, options: Dict, data: Dict, api_handler=None, parent
             spinner_thread.join()
 
 if __name__ == "__main__":
-    API_HANDLER = setup_logging()
+    setup_logging()
     from main import main
-    main(API_HANDLER)
+    main()

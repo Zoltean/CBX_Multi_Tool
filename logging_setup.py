@@ -4,37 +4,8 @@ import requests
 from datetime import datetime
 import platform
 import psutil
-from colorama import Fore, Style
 
-from config import VPS_LOGS_URL, VPS_CONFIG_URL
-
-class APILogHandler(logging.Handler):
-    def __init__(self, api_url: str, iteration_id: str, logger: logging.Logger):
-        super().__init__()
-        self.api_url = api_url
-        self.iteration_id = iteration_id
-        self.buffer = []
-        self.logger = logger  # Сохраняем logger как атрибут класса
-
-    def emit(self, record):
-        log_entry = self.format(record)
-        self.buffer.append(log_entry)  # Только добавляем в буфер, без отправки
-
-    def flush(self):
-        if not self.buffer:
-            self.logger.info("No logs to flush")
-            print(f"{Fore.GREEN}No logs to send to API.{Style.RESET_ALL}")
-            return
-        try:
-            payload = {"iteration_id": self.iteration_id, "logs": self.buffer}
-            response = requests.post(self.api_url, json=payload, timeout=10)
-            response.raise_for_status()
-            self.logger.info(f"Sent {len(self.buffer)} logs to API")
-            print(f"{Fore.GREEN}Sent {len(self.buffer)} logs to API!{Style.RESET_ALL}")
-            self.buffer.clear()
-        except requests.RequestException as e:
-            self.logger.error(f"Failed to flush logs to API: {e}")
-            print(f"{Fore.RED}Failed to send logs to API: {e}{Style.RESET_ALL}")
+from config import VPS_CONFIG_URL
 
 def fetch_config():
     temp_logger = logging.getLogger(__name__)
@@ -49,10 +20,10 @@ def fetch_config():
         response.raise_for_status()
         config = response.json()
         temp_logger.info(f"Config fetched: {config}")
-        return config.get("LOG_TO_FILE", False), config.get("SEND_LOGS_TO_API", True)
+        return config.get("LOG_TO_FILE", False)
     except requests.RequestException as e:
-        temp_logger.error(f"Failed to fetch config: {e}. Using defaults: LOG_TO_FILE=False, SEND_LOGS_TO_API=True")
-        return False, True
+        temp_logger.error(f"Failed to fetch config: {e}. Using default: LOG_TO_FILE=False")
+        return False
     finally:
         temp_logger.removeHandler(temp_handler)
 
@@ -63,7 +34,7 @@ def setup_logging():
     logger.handlers.clear()
 
     iteration_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    LOG_TO_FILE, SEND_LOGS_TO_API = fetch_config()
+    LOG_TO_FILE = fetch_config()
 
     system_info = []
     try:
@@ -90,18 +61,6 @@ def setup_logging():
         except Exception as e:
             logger.error(f"Failed to setup file logging: {e}")
 
-    api_handler = None
-    if SEND_LOGS_TO_API:
-        try:
-            api_handler = APILogHandler(VPS_LOGS_URL, iteration_id, logger)  # Передаём logger
-            api_handler.setFormatter(formatter)
-            logger.addHandler(api_handler)
-            logger.info(f"Logging to API enabled with iteration ID: {iteration_id}")
-        except Exception as e:
-            logger.error(f"Failed to setup API logging: {e}")
-
     logger.info("System Information:")
     for info_line in system_info:
         logger.info(info_line)
-
-    return api_handler

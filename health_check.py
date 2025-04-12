@@ -173,13 +173,12 @@ def get_cash_register_info(cash_path: str, is_external: bool = False) -> Dict:
         "is_external": is_external
     }
 
-def check_cash_profiles(data: Dict, api_handler=None):
+def check_cash_profiles(data: Dict):
     """
     Проверяет здоровье профилей кассы и позволяет управлять ими.
 
     Args:
         data (Dict): Данные приложения (например, конфигурация).
-        api_handler: Обработчик API для логирования (опционально).
     """
     logger.info("Starting cash register health check")
     while True:  # Зацикливаем для возврата в меню
@@ -279,7 +278,7 @@ def check_cash_profiles(data: Dict, api_handler=None):
                 time.sleep(1)
                 stop_event.set()
                 spinner_thread.join()
-                cleanup(data, api_handler)
+                cleanup(data)
                 return
 
             # Проверяем команду 0 (возврат в меню)
@@ -835,7 +834,3 @@ def check_cash_profiles(data: Dict, api_handler=None):
                 spinner_thread.join()
             input("Press Enter to continue...")
             return
-
-        finally:
-            if api_handler:
-                api_handler.flush()

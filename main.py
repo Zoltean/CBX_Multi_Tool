@@ -8,26 +8,28 @@ import platform
 from colorama import init, Fore, Style
 
 from config import PROGRAM_TITLE, VPS_API_URL
-from logging_setup import setup_logging
 from network import check_for_updates, fetch_json
 from menu import display_menu
 from utils import is_admin, show_spinner
 from cleanup import cleanup  # Импортируем cleanup
 
+# Инициализация colorama
+init()
+
+# Настройка локального логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('cbx_multi_tool.log'),  # Логи в файл
+        logging.StreamHandler()  # Логи в консоль (опционально)
+    ]
+)
 logger = logging.getLogger(__name__)
 
-
-def main(api_handler):
+def main():
     logger.info("Starting CBX Core")
     print(f"{Fore.CYAN}Starting CBX Core...{Style.RESET_ALL}")
-
-    # Регистрируем функцию для отправки логов при завершении
-    def exit_handler():
-        if api_handler:
-            logger.info("Program terminated, flushing logs to API")
-            api_handler.flush()
-
-    atexit.register(exit_handler)
 
     try:
         if not is_admin():
@@ -110,8 +112,8 @@ def main(api_handler):
             },
         }
 
-        # Передаём api_handler в display_menu
-        display_menu("Main Menu", menu_options, data, api_handler=api_handler,
+        # Вызов display_menu без api_handler
+        display_menu("Main Menu", menu_options, data,
                      update_available=update_available, download_url=download_url)
 
         logger.info("Program completed normally")
@@ -123,5 +125,4 @@ def main(api_handler):
 
 
 if __name__ == "__main__":
-    API_HANDLER = setup_logging()
-    main(API_HANDLER)
+    main()

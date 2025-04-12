@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 import logging
 import os
-import sys
 import subprocess
+import sys
 import time
 import threading
 from typing import Dict
@@ -15,7 +15,7 @@ from utils import find_all_processes_by_name, show_spinner
 
 logger = logging.getLogger(__name__)
 
-def cleanup(data: Dict, api_handler):  # Добавляем api_handler как аргумент
+def cleanup(data: Dict):
     logger.info("Starting cleanup (user-initiated)")
     print(f"{Fore.CYAN}Cleaning up...{Style.RESET_ALL}")
     files_to_delete = []
@@ -92,11 +92,7 @@ def cleanup(data: Dict, api_handler):  # Добавляем api_handler как �
                     logger.debug(f"File {file} does not exist, skipping")
                     pbar.update(1)
 
-        if api_handler:
-            logger.info("Flushing logs to API before cleanup exit")
-            api_handler.flush()
-
-            # Ждём завершения всех потоков
+        # Ждём завершения всех потоков
         for thread in threading.enumerate():
             if thread is not threading.current_thread() and thread.is_alive():
                 logger.info(f"Waiting for thread {thread.name} to finish")
