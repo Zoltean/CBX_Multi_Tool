@@ -237,6 +237,7 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                 profile_path = os.path.join(profiles_dir, profile)
                 db_path = os.path.join(profile_path, "agent.db")
                 version = "Unknown"
+                fiscal_number = "Unknown"
 
                 try:
                     if os.path.exists(os.path.join(profile_path, "version")):
@@ -244,6 +245,19 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                             version = f.read().strip()
                 except Exception as e:
                     logger.error(f"Failed to read version file for {profile}: {e}")
+
+                try:
+                    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT fiscal_number FROM cash_register LIMIT 1;")
+                    result = cursor.fetchone()
+                    if result and result[0]:
+                        fiscal_number = result[0]
+                    else:
+                        logger.debug(f"No fiscal_number found for {profile}")
+                    conn.close()
+                except Error as e:
+                    logger.error(f"Failed to fetch fiscal_number for {profile}: {e}")
 
                 health = "BAD"
                 trans_status = "ERROR"
@@ -292,13 +306,18 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                             logger.debug(f"Closed connection to {db_path}")
                             time.sleep(0.1)
 
+                # Проверяем, запущен ли процесс checkbox_kasa.exe
+                is_running = bool(find_process_by_path("checkbox_kasa.exe", profile_path))
+
                 profiles_info.append({
                     "name": profile,
                     "path": profile_path,
                     "health": health,
                     "trans_status": trans_status,
                     "shift_status": shift_status,
-                    "version": version
+                    "version": version,
+                    "fiscal_number": fiscal_number,
+                    "is_running": is_running
                 })
 
             while True:
@@ -312,11 +331,16 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                     health_color = Fore.GREEN if profile["health"] == "OK" else Fore.RED
                     trans_color = Fore.GREEN if profile["trans_status"] in ["DONE", "EMPTY"] else Fore.RED
                     shift_color = Fore.GREEN if profile["shift_status"] == "CLOSED" else Fore.RED
+                    # Для патчинга: ON - красный, OFF - зеленый
+                    status_text = "ON" if profile["is_running"] else "OFF"
+                    status_color = Fore.RED if profile["is_running"] else Fore.GREEN
                     profile_str = (
-                        f"Health: {health_color}{profile['health']}{Style.RESET_ALL} | "
-                        f"{trans_color}{profile['trans_status']}{Style.RESET_ALL} | "
-                        f"{shift_color}{profile['shift_status']}{Style.RESET_ALL} "
-                        f"v{profile['version']}"
+                        f"| {Fore.YELLOW}FN:{profile['fiscal_number']}{Style.RESET_ALL} "
+                        f"| {status_color}{status_text}{Style.RESET_ALL} "
+                        f"| H:{health_color}{profile['health']}{Style.RESET_ALL} "
+                        f"| T:{trans_color}{profile['trans_status']}{Style.RESET_ALL} "
+                        f"| S:{shift_color}{profile['shift_status']}{Style.RESET_ALL} "
+                        f"| v{profile['version']}"
                     )
                     print(f"{i}. {Fore.CYAN}{profile['name']}{Style.RESET_ALL} {profile_str}")
                 print()  # Пустая строка перед "All profiles"

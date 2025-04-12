@@ -353,6 +353,7 @@ def check_cash_profiles(data: Dict, api_handler=None):
                 profile_path = os.path.join(profiles_dir, profile)
                 db_path = os.path.join(profile_path, "agent.db")
                 version = "Unknown"
+                fiscal_number = "Unknown"
 
                 try:
                     if os.path.exists(os.path.join(profile_path, "version")):
@@ -360,6 +361,19 @@ def check_cash_profiles(data: Dict, api_handler=None):
                             version = f.read().strip()
                 except Exception as e:
                     logger.error(f"Failed to read version file for {profile}: {e}")
+
+                try:
+                    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT fiscal_number FROM cash_register LIMIT 1;")
+                    result = cursor.fetchone()
+                    if result and result[0]:
+                        fiscal_number = result[0]
+                    else:
+                        logger.debug(f"No fiscal_number found for {profile}")
+                    conn.close()
+                except Error as e:
+                    logger.error(f"Failed to fetch fiscal_number for {profile}: {e}")
 
                 health = "BAD"
                 trans_status = "ERROR"
@@ -408,23 +422,39 @@ def check_cash_profiles(data: Dict, api_handler=None):
                             logger.debug(f"Closed connection to {db_path}")
                             time.sleep(0.1)
 
-                # Формируем строку вывода для профиля
-                health_color = Fore.GREEN if health == "OK" else Fore.RED
-                trans_status_color = Fore.GREEN if trans_status in ["DONE", "EMPTY"] else Fore.RED
-                shift_status_color = Fore.GREEN if shift_status == "CLOSED" else Fore.RED
-                output = (
-                    f"Health: {health_color}{health}{Style.RESET_ALL} | "
-                    f"{trans_status_color}{trans_status}{Style.RESET_ALL} | "
-                    f"{shift_status_color}{shift_status}{Style.RESET_ALL} "
-                    f"v{version}"
-                )
-                profiles_info.append((profile, output, profile_path))
+                # Проверяем, запущен ли процесс checkbox_kasa.exe
+                is_running = bool(find_process_by_path("checkbox_kasa.exe", profile_path))
+
+                profiles_info.append({
+                    "name": profile,
+                    "path": profile_path,
+                    "health": health,
+                    "trans_status": trans_status,
+                    "shift_status": shift_status,
+                    "version": version,
+                    "fiscal_number": fiscal_number,
+                    "is_running": is_running
+                })
 
             # Выводим профили с номерами
             print(f"{Fore.CYAN}Available profiles:{Style.RESET_ALL}")
             print()
-            for i, (profile, info, _) in enumerate(profiles_info, 1):
-                print(f"{i}. {Fore.WHITE}{profile}{Style.RESET_ALL} {info}")
+            for i, profile in enumerate(profiles_info, 1):
+                health_color = Fore.GREEN if profile["health"] == "OK" else Fore.RED
+                trans_color = Fore.GREEN if profile["trans_status"] in ["DONE", "EMPTY"] else Fore.RED
+                shift_color = Fore.GREEN if profile["shift_status"] == "CLOSED" else Fore.RED
+                # Для health: ON - зеленый, OFF - красный
+                status_text = "ON" if profile["is_running"] else "OFF"
+                status_color = Fore.GREEN if profile["is_running"] else Fore.RED
+                profile_str = (
+                    f"| {Fore.YELLOW}FN:{profile['fiscal_number']}{Style.RESET_ALL} "
+                    f"| {status_color}{status_text}{Style.RESET_ALL} "
+                    f"| H:{health_color}{profile['health']}{Style.RESET_ALL} "
+                    f"| T:{trans_color}{profile['trans_status']}{Style.RESET_ALL} "
+                    f"| S:{shift_color}{profile['shift_status']}{Style.RESET_ALL} "
+                    f"| v{profile['version']}"
+                )
+                print(f"{i}. {Fore.CYAN}{profile['name']}{Style.RESET_ALL} {profile_str}")
             print()
             print(f"0. Back")
             print(f"{Fore.CYAN}{'=' * 40}{Style.RESET_ALL}")
@@ -447,15 +477,15 @@ def check_cash_profiles(data: Dict, api_handler=None):
             try:
                 choice_int = int(choice)
                 if 1 <= choice_int <= len(profiles_info):
-                    selected_profile, _, selected_path = profiles_info[choice_int - 1]
-                    logger.info(f"User selected profile: {selected_profile}")
+                    selected_profile = profiles_info[choice_int - 1]
+                    logger.info(f"User selected profile: {selected_profile['name']}")
 
                     # Убиваем процесс кассы, если он запущен
-                    kasa_process = find_process_by_path("checkbox_kasa.exe", selected_path)
+                    kasa_process = find_process_by_path("checkbox_kasa.exe", selected_profile['path'])
                     if kasa_process:
                         try:
                             kasa_process.kill()
-                            logger.info(f"Killed checkbox_kasa.exe (PID: {kasa_process.pid}) for {selected_profile}")
+                            logger.info(f"Killed checkbox_kasa.exe (PID: {kasa_process.pid}) for {selected_profile['name']}")
                             print(f"{Fore.GREEN}Killed checkbox_kasa.exe (PID: {kasa_process.pid}).{Style.RESET_ALL}")
                             stop_event = threading.Event()
                             spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process killed"))
@@ -464,9 +494,9 @@ def check_cash_profiles(data: Dict, api_handler=None):
                             stop_event.set()
                             spinner_thread.join()
                         except psutil.NoSuchProcess:
-                            logger.warning(f"checkbox_kasa.exe already terminated for {selected_profile}")
+                            logger.warning(f"checkbox_kasa.exe already terminated for {selected_profile['name']}")
                         except Exception as e:
-                            logger.error(f"Failed to kill checkbox_kasa.exe for {selected_profile}: {e}")
+                            logger.error(f"Failed to kill checkbox_kasa.exe for {selected_profile['name']}: {e}")
                             print(f"{Fore.RED}Failed to kill process: {e}{Style.RESET_ALL}")
 
                     # Замораживаем процессы менеджера
@@ -490,13 +520,13 @@ def check_cash_profiles(data: Dict, api_handler=None):
                         spinner_thread.join()
 
                     # Запускаем кассу в отдельной консоли
-                    kasa_path = os.path.join(selected_path, "checkbox_kasa.exe")
+                    kasa_path = os.path.join(selected_profile['path'], "checkbox_kasa.exe")
                     if os.path.exists(kasa_path):
                         try:
                             logger.info(f"Launching {kasa_path} via cmd")
                             print(f"{Fore.CYAN}Launching cash register {kasa_path}...{Style.RESET_ALL}")
                             cmd = f'start cmd /K "{kasa_path}"'
-                            subprocess.Popen(cmd, cwd=selected_path, shell=True)
+                            subprocess.Popen(cmd, cwd=selected_profile['path'], shell=True)
                             logger.info(f"Successfully launched {kasa_path}")
                             print(f"{Fore.GREEN}Cash register launched successfully!{Style.RESET_ALL}")
                             stop_event = threading.Event()
@@ -509,8 +539,8 @@ def check_cash_profiles(data: Dict, api_handler=None):
                             logger.error(f"Failed to launch {kasa_path}: {e}")
                             print(f"{Fore.RED}Failed to launch cash register: {e}{Style.RESET_ALL}")
                     else:
-                        logger.warning(f"checkbox_kasa.exe not found in {selected_path}")
-                        print(f"{Fore.YELLOW}checkbox_kasa.exe not found in {selected_path}{Style.RESET_ALL}")
+                        logger.warning(f"checkbox_kasa.exe not found in {selected_profile['path']}")
+                        print(f"{Fore.YELLOW}checkbox_kasa.exe not found in {selected_profile['path']}{Style.RESET_ALL}")
 
                     # Ждём 3 секунды и размораживаем менеджер
                     time.sleep(3)
