@@ -92,11 +92,11 @@ def cleanup(data: Dict, api_handler):  # Добавляем api_handler как �
                     logger.debug(f"File {file} does not exist, skipping")
                     pbar.update(1)
 
-        if api_handler:  # Используем переданный api_handler
-            logger.info("Flushing remaining logs before cleanup exit")
+        if api_handler:
+            logger.info("Flushing logs to API before cleanup exit")
             api_handler.flush()
 
-        # Ждём завершения всех потоков
+            # Ждём завершения всех потоков
         for thread in threading.enumerate():
             if thread is not threading.current_thread() and thread.is_alive():
                 logger.info(f"Waiting for thread {thread.name} to finish")

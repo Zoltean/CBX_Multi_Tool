@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import atexit
 import logging
 import os
 import time
@@ -16,9 +17,17 @@ from cleanup import cleanup  # Импортируем cleanup
 logger = logging.getLogger(__name__)
 
 
-def main(api_handler):  # Добавляем api_handler как аргумент
+def main(api_handler):
     logger.info("Starting CBX Core")
     print(f"{Fore.CYAN}Starting CBX Core...{Style.RESET_ALL}")
+
+    # Регистрируем функцию для отправки логов при завершении
+    def exit_handler():
+        if api_handler:
+            logger.info("Program terminated, flushing logs to API")
+            api_handler.flush()
+
+    atexit.register(exit_handler)
 
     try:
         if not is_admin():

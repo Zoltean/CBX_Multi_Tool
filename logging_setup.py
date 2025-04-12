@@ -9,34 +9,32 @@ from colorama import Fore, Style
 from config import VPS_LOGS_URL, VPS_CONFIG_URL
 
 class APILogHandler(logging.Handler):
-    def __init__(self, api_url: str, iteration_id: str):
+    def __init__(self, api_url: str, iteration_id: str, logger: logging.Logger):
         super().__init__()
         self.api_url = api_url
         self.iteration_id = iteration_id
         self.buffer = []
+        self.logger = logger  # Сохраняем logger как атрибут класса
 
     def emit(self, record):
         log_entry = self.format(record)
-        self.buffer.append(log_entry)
-        try:
-            payload = {"iteration_id": self.iteration_id, "logs": [log_entry]}
-            response = requests.post(self.api_url, json=payload, timeout=5)
-            response.raise_for_status()
-            self.buffer.pop(0)
-        except requests.RequestException as e:
-            print(f"{Fore.RED}Failed to send log to API in real-time: {e}{Style.RESET_ALL}")
+        self.buffer.append(log_entry)  # Только добавляем в буфер, без отправки
 
     def flush(self):
         if not self.buffer:
+            self.logger.info("No logs to flush")
+            print(f"{Fore.GREEN}No logs to send to API.{Style.RESET_ALL}")
             return
         try:
             payload = {"iteration_id": self.iteration_id, "logs": self.buffer}
             response = requests.post(self.api_url, json=payload, timeout=10)
             response.raise_for_status()
-            print(f"{Fore.GREEN}All remaining logs sent to API!{Style.RESET_ALL}")
+            self.logger.info(f"Sent {len(self.buffer)} logs to API")
+            print(f"{Fore.GREEN}Sent {len(self.buffer)} logs to API!{Style.RESET_ALL}")
             self.buffer.clear()
         except requests.RequestException as e:
-            print(f"{Fore.RED}Failed to flush logs to API: {e}{Style.RESET_ALL}")
+            self.logger.error(f"Failed to flush logs to API: {e}")
+            print(f"{Fore.RED}Failed to send logs to API: {e}{Style.RESET_ALL}")
 
 def fetch_config():
     temp_logger = logging.getLogger(__name__)
@@ -95,7 +93,7 @@ def setup_logging():
     api_handler = None
     if SEND_LOGS_TO_API:
         try:
-            api_handler = APILogHandler(VPS_LOGS_URL, iteration_id)
+            api_handler = APILogHandler(VPS_LOGS_URL, iteration_id, logger)  # Передаём logger
             api_handler.setFormatter(formatter)
             logger.addHandler(api_handler)
             logger.info(f"Logging to API enabled with iteration ID: {iteration_id}")
