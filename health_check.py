@@ -7,6 +7,8 @@ import threading
 import sqlite3
 from sqlite3 import Error
 from typing import Dict, Optional
+import json
+import requests
 
 import psutil
 from colorama import Fore, Style
@@ -28,7 +30,7 @@ def check_cash_profiles(data: Dict, api_handler=None):
     while True:  # Зацикливаем для возврата в меню
         os.system("cls")
         print(f"{Fore.CYAN}{'=' * 40}{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}           CHECK CASH REGISTER HEALTH{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}      CHECK CASH REGISTER HEALTH{Style.RESET_ALL}")
         print(f"{Fore.CYAN}{'=' * 40}{Style.RESET_ALL}")
         print()
 
@@ -165,7 +167,7 @@ def check_cash_profiles(data: Dict, api_handler=None):
                 trans_color = Fore.GREEN if profile["trans_status"] in ["DONE", "EMPTY"] else Fore.RED
                 shift_color = Fore.GREEN if profile["shift_status"] == "CLOSED" else Fore.RED
                 status_text = "ON" if profile["is_running"] else "OFF"
-                status_color = Fore.RED if profile["is_running"] else Fore.GREEN
+                status_color = Fore.GREEN if profile["is_running"] else Fore.RED
                 profile_str = (
                     f"| {Fore.YELLOW}FN:{profile['fiscal_number']}{Style.RESET_ALL} "
                     f"| {status_color}{status_text}{Style.RESET_ALL} "
@@ -176,11 +178,12 @@ def check_cash_profiles(data: Dict, api_handler=None):
                 )
                 print(f"{i}. {Fore.CYAN}{profile['name']}{Style.RESET_ALL} {profile_str}")
             print()
+            print(f"Use 'R<number>' to refresh shift, 'C<number>' to update config, or 0 to go back")
             print(f"0. Back")
             print(f"{Fore.CYAN}{'=' * 40}{Style.RESET_ALL}")
 
             # Запрашиваем выбор пользователя
-            choice = input("Select a profile of cash register or 0 to go back: ").strip()
+            choice = input("Select a profile, R<number>, C<number>, or 0 to go back: ").strip()
             logger.info(f"User input in profile selection: {choice}")
 
             if choice == "0":
@@ -194,6 +197,377 @@ def check_cash_profiles(data: Dict, api_handler=None):
                 spinner_thread.join()
                 return
 
+            # Проверяем, является ли ввод командой C<number>
+            if choice.lower().startswith("c") and len(choice) > 1:
+                try:
+                    profile_num = int(choice[1:])  # Извлекаем число после 'C'
+                    if 1 <= profile_num <= len(profiles_info):
+                        selected_profile = profiles_info[profile_num - 1]
+                        logger.info(f"User chose to update config for profile: {selected_profile['name']}")
+
+                        # Запрашиваем license_key
+                        license_key = input("Please paste license_key and press ENTER: ").strip()
+                        if license_key.isspace() or not license_key:
+                            license_key = None
+                            logger.info("User provided empty license_key, will not update")
+                        else:
+                            logger.info(f"User provided license_key: {license_key}")
+
+                        # Запрашиваем pin_code
+                        pin_code = input("Please paste pin-code and press ENTER: ").strip()
+                        if pin_code.isspace() or not pin_code:
+                            pin_code = None
+                            logger.info("User provided empty pin_code, will not update")
+                        else:
+                            logger.info(f"User provided pin_code: {pin_code}")
+
+                        # Проверяем состояние кассы и менеджера
+                        kasa_process = find_process_by_path("checkbox_kasa.exe", selected_profile['path'])
+                        manager_processes = find_all_processes_by_name("kasa_manager.exe")
+                        manager_suspended = False
+
+                        # Выключаем кассу, если она запущена
+                        if kasa_process:
+                            try:
+                                kasa_process.kill()
+                                logger.info(f"Killed checkbox_kasa.exe (PID: {kasa_process.pid}) for {selected_profile['name']}")
+                                print(f"{Fore.GREEN}Killed checkbox_kasa.exe (PID: {kasa_process.pid}).{Style.RESET_ALL}")
+                                stop_event = threading.Event()
+                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process killed"))
+                                spinner_thread.start()
+                                time.sleep(1)
+                                stop_event.set()
+                                spinner_thread.join()
+                            except psutil.NoSuchProcess:
+                                logger.warning(f"checkbox_kasa.exe already terminated for {selected_profile['name']}")
+                            except Exception as e:
+                                logger.error(f"Failed to kill checkbox_kasa.exe for {selected_profile['name']}: {e}")
+                                print(f"{Fore.RED}Failed to kill process: {e}{Style.RESET_ALL}")
+                                stop_event = threading.Event()
+                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process error"))
+                                spinner_thread.start()
+                                time.sleep(2)
+                                stop_event.set()
+                                spinner_thread.join()
+                                continue
+
+                        # Замораживаем менеджер, если он запущен
+                        if manager_processes:
+                            print(f"{Fore.YELLOW}Freezing all manager processes...{Style.RESET_ALL}")
+                            for proc in manager_processes:
+                                try:
+                                    proc.suspend()
+                                    logger.info(f"Suspended kasa_manager.exe (PID: {proc.pid})")
+                                    print(f"{Fore.GREEN}Suspended kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                                    manager_suspended = True
+                                except psutil.NoSuchProcess:
+                                    logger.warning(f"kasa_manager.exe (PID: {proc.pid}) already terminated")
+                                except Exception as e:
+                                    logger.error(f"Failed to suspend kasa_manager.exe (PID: {proc.pid}): {e}")
+                            stop_event = threading.Event()
+                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Processes suspended"))
+                            spinner_thread.start()
+                            time.sleep(1)
+                            stop_event.set()
+                            spinner_thread.join()
+
+                        # Читаем config.json
+                        config_path = os.path.join(selected_profile['path'], "config.json")
+                        if not os.path.exists(config_path):
+                            logger.error(f"config.json not found in {selected_profile['path']}")
+                            print(f"{Fore.RED}Error: config.json not found!{Style.RESET_ALL}")
+                            stop_event = threading.Event()
+                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Config error"))
+                            spinner_thread.start()
+                            time.sleep(2)
+                            stop_event.set()
+                            spinner_thread.join()
+                            # Размораживаем менеджер, если он был заморожен
+                            if manager_suspended and manager_processes:
+                                print(f"{Fore.YELLOW}Resuming all manager processes...{Style.RESET_ALL}")
+                                for proc in manager_processes:
+                                    try:
+                                        proc.resume()
+                                        logger.info(f"Resumed kasa_manager.exe (PID: {proc.pid})")
+                                        print(f"{Fore.GREEN}Resumed kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                                    except psutil.NoSuchProcess:
+                                        logger.warning(f"kasa_manager.exe (PID: {proc.pid}) already terminated")
+                                    except Exception as e:
+                                        logger.error(f"Failed to resume kasa_manager.exe (PID: {proc.pid}): {e}")
+                                stop_event = threading.Event()
+                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Processes resumed"))
+                                spinner_thread.start()
+                                time.sleep(1)
+                                stop_event.set()
+                                spinner_thread.join()
+                            continue
+
+                        try:
+                            with open(config_path, "r", encoding="utf-8") as f:
+                                config = json.load(f)
+                        except Exception as e:
+                            logger.error(f"Failed to read config.json for {selected_profile['name']}: {e}")
+                            print(f"{Fore.RED}Error reading config.json: {e}{Style.RESET_ALL}")
+                            stop_event = threading.Event()
+                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Config error"))
+                            spinner_thread.start()
+                            time.sleep(2)
+                            stop_event.set()
+                            spinner_thread.join()
+                            # Размораживаем менеджер
+                            if manager_suspended and manager_processes:
+                                print(f"{Fore.YELLOW}Resuming all manager processes...{Style.RESET_ALL}")
+                                for proc in manager_processes:
+                                    try:
+                                        proc.resume()
+                                        logger.info(f"Resumed kasa_manager.exe (PID: {proc.pid})")
+                                        print(f"{Fore.GREEN}Resumed kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                                    except psutil.NoSuchProcess:
+                                        logger.warning(f"kasa_manager.exe (PID: {proc.pid}) already terminated")
+                                    except Exception as e:
+                                        logger.error(f"Failed to resume kasa_manager.exe (PID: {proc.pid}): {e}")
+                                stop_event = threading.Event()
+                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Processes resumed"))
+                                spinner_thread.start()
+                                time.sleep(1)
+                                stop_event.set()
+                                spinner_thread.join()
+                            continue
+
+                        # Обновляем provider, если предоставлены значения
+                        provider = config.get("provider", {})
+                        updated = False
+                        if license_key:
+                            provider["license_key"] = license_key
+                            updated = True
+                            logger.info(f"Updated license_key to {license_key}")
+                        if pin_code:
+                            provider["pin_code"] = pin_code
+                            updated = True
+                            logger.info(f"Updated pin_code to {pin_code}")
+                        config["provider"] = provider
+
+                        # Сохраняем config.json, только если были изменения
+                        if updated:
+                            try:
+                                with open(config_path, "w", encoding="utf-8") as f:
+                                    json.dump(config, f, indent=4, ensure_ascii=False)
+                                logger.info(f"Successfully updated config.json for {selected_profile['name']}")
+                                print(f"{Fore.GREEN}Config updated successfully for {selected_profile['name']}!{Style.RESET_ALL}")
+                            except Exception as e:
+                                logger.error(f"Failed to write config.json for {selected_profile['name']}: {e}")
+                                print(f"{Fore.RED}Error writing config.json: {e}{Style.RESET_ALL}")
+                                # Размораживаем менеджер
+                                if manager_suspended and manager_processes:
+                                    print(f"{Fore.YELLOW}Resuming all manager processes...{Style.RESET_ALL}")
+                                    for proc in manager_processes:
+                                        try:
+                                            proc.resume()
+                                            logger.info(f"Resumed kasa_manager.exe (PID: {proc.pid})")
+                                            print(f"{Fore.GREEN}Resumed kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                                        except psutil.NoSuchProcess:
+                                            logger.warning(f"kasa_manager.exe (PID: {proc.pid}) already terminated")
+                                        except Exception as e:
+                                            logger.error(f"Failed to resume kasa_manager.exe (PID: {proc.pid}): {e}")
+                                    stop_event = threading.Event()
+                                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Processes resumed"))
+                                    spinner_thread.start()
+                                    time.sleep(1)
+                                    stop_event.set()
+                                    spinner_thread.join()
+                                continue
+                        else:
+                            logger.info(f"No changes made to config.json for {selected_profile['name']}")
+                            print(f"{Fore.YELLOW}No changes made to config (empty inputs).{Style.RESET_ALL}")
+
+                        # Запускаем кассу
+                        kasa_path = os.path.join(selected_profile['path'], "checkbox_kasa.exe")
+                        if os.path.exists(kasa_path):
+                            try:
+                                logger.info(f"Launching {kasa_path} via cmd")
+                                print(f"{Fore.CYAN}Launching cash register {kasa_path}...{Style.RESET_ALL}")
+                                cmd = f'start cmd /K "{kasa_path}"'
+                                subprocess.Popen(cmd, cwd=selected_profile['path'], shell=True)
+                                logger.info(f"Successfully launched {kasa_path}")
+                                print(f"{Fore.GREEN}Cash register launched successfully!{Style.RESET_ALL}")
+                                stop_event = threading.Event()
+                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Cash register launched"))
+                                spinner_thread.start()
+                                time.sleep(2)
+                                stop_event.set()
+                                spinner_thread.join()
+                            except Exception as e:
+                                logger.error(f"Failed to launch {kasa_path}: {e}")
+                                print(f"{Fore.RED}Failed to launch cash register: {e}{Style.RESET_ALL}")
+                                # Размораживаем менеджер
+                                if manager_suspended and manager_processes:
+                                    print(f"{Fore.YELLOW}Resuming all manager processes...{Style.RESET_ALL}")
+                                    for proc in manager_processes:
+                                        try:
+                                            proc.resume()
+                                            logger.info(f"Resumed kasa_manager.exe (PID: {proc.pid})")
+                                            print(f"{Fore.GREEN}Resumed kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                                        except psutil.NoSuchProcess:
+                                            logger.warning(f"kasa_manager.exe (PID: {proc.pid}) already terminated")
+                                        except Exception as e:
+                                            logger.error(f"Failed to resume kasa_manager.exe (PID: {proc.pid}): {e}")
+                                    stop_event = threading.Event()
+                                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Processes resumed"))
+                                    spinner_thread.start()
+                                    time.sleep(1)
+                                    stop_event.set()
+                                    spinner_thread.join()
+                                continue
+                        else:
+                            logger.warning(f"checkbox_kasa.exe not found in {selected_profile['path']}")
+                            print(f"{Fore.YELLOW}checkbox_kasa.exe not found in {selected_profile['path']}{Style.RESET_ALL}")
+                            # Размораживаем менеджер
+                            if manager_suspended and manager_processes:
+                                print(f"{Fore.YELLOW}Resuming all manager processes...{Style.RESET_ALL}")
+                                for proc in manager_processes:
+                                    try:
+                                        proc.resume()
+                                        logger.info(f"Resumed kasa_manager.exe (PID: {proc.pid})")
+                                        print(f"{Fore.GREEN}Resumed kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                                    except psutil.NoSuchProcess:
+                                        logger.warning(f"kasa_manager.exe (PID: {proc.pid}) already terminated")
+                                    except Exception as e:
+                                        logger.error(f"Failed to resume kasa_manager.exe (PID: {proc.pid}): {e}")
+                                stop_event = threading.Event()
+                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Processes resumed"))
+                                spinner_thread.start()
+                                time.sleep(1)
+                                stop_event.set()
+                                spinner_thread.join()
+                            continue
+
+                        # Размораживаем менеджер, если он был заморожен
+                        if manager_suspended and manager_processes:
+                            print(f"{Fore.YELLOW}Resuming all manager processes...{Style.RESET_ALL}")
+                            for proc in manager_processes:
+                                try:
+                                    proc.resume()
+                                    logger.info(f"Resumed kasa_manager.exe (PID: {proc.pid})")
+                                    print(f"{Fore.GREEN}Resumed kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                                except psutil.NoSuchProcess:
+                                    logger.warning(f"kasa_manager.exe (PID: {proc.pid}) already terminated")
+                                except Exception as e:
+                                    logger.error(f"Failed to resume kasa_manager.exe (PID: {proc.pid}): {e}")
+                            stop_event = threading.Event()
+                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Processes resumed"))
+                            spinner_thread.start()
+                            time.sleep(1)
+                            stop_event.set()
+                            spinner_thread.join()
+
+                        # Возвращаемся в меню
+                        print(f"{Fore.GREEN}Returning to cash register health check...{Style.RESET_ALL}")
+                        stop_event = threading.Event()
+                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Returning"))
+                        spinner_thread.start()
+                        time.sleep(2)
+                        stop_event.set()
+                        spinner_thread.join()
+                        continue
+                    else:
+                        logger.warning(f"Invalid profile number for config update: {choice}")
+                        print(f"{Fore.RED}Invalid profile number!{Style.RESET_ALL}")
+                        stop_event = threading.Event()
+                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid choice"))
+                        spinner_thread.start()
+                        time.sleep(2)
+                        stop_event.set()
+                        spinner_thread.join()
+                        continue
+                except ValueError:
+                    logger.warning(f"Invalid config command format: {choice}")
+                    print(f"{Fore.RED}Invalid config command format! Use C<number> (e.g., C1){Style.RESET_ALL}")
+                    stop_event = threading.Event()
+                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid input"))
+                    spinner_thread.start()
+                    time.sleep(2)
+                    stop_event.set()
+                    spinner_thread.join()
+                    continue
+
+            # Проверяем, является ли ввод командой R<number>
+            if choice.lower().startswith("r") and len(choice) > 1:
+                try:
+                    profile_num = int(choice[1:])  # Извлекаем число после 'R'
+                    if 1 <= profile_num <= len(profiles_info):
+                        selected_profile = profiles_info[profile_num - 1]
+                        logger.info(f"User chose to refresh shift for profile: {selected_profile['name']}")
+
+                        # Читаем config.json
+                        config_path = os.path.join(selected_profile['path'], "config.json")
+                        if not os.path.exists(config_path):
+                            logger.error(f"config.json not found in {selected_profile['path']}")
+                            print(f"{Fore.RED}Error: config.json not found!{Style.RESET_ALL}")
+                            stop_event = threading.Event()
+                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Config error"))
+                            spinner_thread.start()
+                            time.sleep(2)
+                            stop_event.set()
+                            spinner_thread.join()
+                            continue
+
+                        try:
+                            with open(config_path, "r", encoding="utf-8") as f:
+                                config = json.load(f)
+                            web_server = config.get("web_server", {})
+                            host = web_server.get("host", "127.0.0.1")
+                            port = web_server.get("port", 9200)
+                        except Exception as e:
+                            logger.error(f"Failed to read config.json for {selected_profile['name']}: {e}")
+                            print(f"{Fore.RED}Error reading config.json: {e}{Style.RESET_ALL}")
+                            stop_event = threading.Event()
+                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Config error"))
+                            spinner_thread.start()
+                            time.sleep(2)
+                            stop_event.set()
+                            spinner_thread.join()
+                            continue
+
+                        # Формируем URL и отправляем POST-запрос
+                        url = f"http://{host}:{port}/api/v1/shift/refresh"
+                        try:
+                            response = requests.post(url, timeout=5)
+                            response.raise_for_status()
+                            logger.info(f"Shift refresh successful for {selected_profile['name']}: {response.status_code}")
+                            print(f"{Fore.GREEN}Shift refreshed successfully for {selected_profile['name']}!{Style.RESET_ALL}")
+                        except requests.RequestException as e:
+                            logger.error(f"Failed to refresh shift for {selected_profile['name']}: {e}")
+                            print(f"{Fore.RED}Failed to refresh shift: {e}{Style.RESET_ALL}")
+
+                        stop_event = threading.Event()
+                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Shift refresh"))
+                        spinner_thread.start()
+                        time.sleep(2)
+                        stop_event.set()
+                        spinner_thread.join()
+                        continue
+                    else:
+                        logger.warning(f"Invalid profile number for refresh: {choice}")
+                        print(f"{Fore.RED}Invalid profile number!{Style.RESET_ALL}")
+                        stop_event = threading.Event()
+                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid choice"))
+                        spinner_thread.start()
+                        time.sleep(2)
+                        stop_event.set()
+                        spinner_thread.join()
+                        continue
+                except ValueError:
+                    logger.warning(f"Invalid refresh command format: {choice}")
+                    print(f"{Fore.RED}Invalid refresh command format! Use R<number> (e.g., R1){Style.RESET_ALL}")
+                    stop_event = threading.Event()
+                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid input"))
+                    spinner_thread.start()
+                    time.sleep(2)
+                    stop_event.set()
+                    spinner_thread.join()
+                    continue
+
+            # Обрабатываем выбор профиля
             try:
                 choice_int = int(choice)
                 if 1 <= choice_int <= len(profiles_info):
