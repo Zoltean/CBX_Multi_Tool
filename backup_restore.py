@@ -107,17 +107,21 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
                 try:
                     proc.kill()
                     print(f"{Fore.GREEN}✓ Stopped {proc.info['name']} (PID: {proc.pid}).{Style.RESET_ALL}")
-                    stop_event = threading.Event()
-                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process stopped"))
-                    spinner_thread.start()
-                    time.sleep(1)
-                    stop_event.set()
-                    spinner_thread.join()
                 except psutil.NoSuchProcess:
                     pass
                 except Exception:
                     print(f"{Fore.RED}✗ Failed to stop {proc.info['name']} (PID: {proc.pid}).{Style.RESET_ALL}")
-            time.sleep(2)
+            # Immediately suspend manager processes to prevent cash restart
+            if is_rro_agent and manager_running:
+                print(f"{Fore.YELLOW}Pausing manager processes...{Style.RESET_ALL}")
+                for proc in manager_processes:
+                    try:
+                        proc.suspend()
+                        print(f"{Fore.GREEN}✓ Paused kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                    except psutil.NoSuchProcess:
+                        pass
+                    except Exception:
+                        print(f"{Fore.RED}✗ Failed to pause kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
         else:
             print(f"{Fore.RED}✗ Restoration cancelled.{Style.RESET_ALL}")
             stop_event = threading.Event()
@@ -127,24 +131,6 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
             stop_event.set()
             spinner_thread.join()
             return False
-
-        if is_rro_agent and cash_running and manager_running:
-            print(f"{Fore.YELLOW}Pausing manager processes...{Style.RESET_ALL}")
-            for proc in manager_processes:
-                try:
-                    proc.suspend()
-                    print(f"{Fore.GREEN}✓ Paused kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
-                    stop_event = threading.Event()
-                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process paused"))
-                    spinner_thread.start()
-                    time.sleep(1)
-                    stop_event.set()
-                    spinner_thread.join()
-                except psutil.NoSuchProcess:
-                    pass
-                except Exception:
-                    print(f"{Fore.RED}✗ Failed to pause kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
-            time.sleep(2)
     elif is_rro_agent and manager_running:
         print(f"{Fore.YELLOW}Cash register not running, manager running - proceeding...{Style.RESET_ALL}")
     else:

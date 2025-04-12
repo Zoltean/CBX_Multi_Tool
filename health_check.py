@@ -18,6 +18,9 @@ from utils import show_spinner, find_process_by_path, find_all_processes_by_name
 from cleanup import cleanup
 
 def find_external_cash_registers_by_processes() -> list:
+    """
+    Finds cash registers by checking running processes for checkbox_kasa.exe.
+    """
     external_cashes = []
     seen_paths = set()
 
@@ -36,25 +39,61 @@ def find_external_cash_registers_by_processes() -> list:
 
     return external_cashes
 
-def find_external_cash_registers_by_filesystem() -> list:
+def find_external_cash_registers_by_filesystem(manager_dir: str, seen_paths: set) -> list:
+    """
+    Performs a recursive search for cash registers within the manager's profiles directory (depth of 2).
+    Excludes paths already seen to avoid duplicates.
+    """
     external_cashes = []
-    seen_paths = set()
 
-    for drive in DRIVES:
-        try:
-            pattern = os.path.join(drive, "*", "*", "checkbox_kasa.exe")
-            for kasa_exe in glob.glob(pattern, recursive=False):
-                kasa_dir = os.path.normpath(os.path.dirname(kasa_exe)).lower()
-                if kasa_dir not in seen_paths:
-                    seen_paths.add(kasa_dir)
-                    external_cashes.append({
-                        "path": kasa_dir,
-                        "source": "filesystem"
-                    })
-        except Exception:
-            continue
+    pattern = os.path.join(manager_dir, "profiles", "*", "checkbox_kasa.exe")
+    try:
+        for kasa_exe in glob.glob(pattern, recursive=False):
+            kasa_dir = os.path.normpath(os.path.dirname(kasa_exe)).lower()
+            if kasa_dir not in seen_paths:
+                seen_paths.add(kasa_dir)
+                external_cashes.append({
+                    "path": kasa_dir,
+                    "source": "filesystem"
+                })
+    except Exception:
+        pass
 
     return external_cashes
+
+def find_cash_registers_by_profiles_json(manager_dir: str) -> tuple[list, bool, set]:
+    """
+    Reads profiles.json to find cash register locations.
+    Returns a list of cash registers, a boolean indicating if the file is empty, and a set of seen paths.
+    """
+    profiles_json_path = os.path.join(manager_dir, "profiles.json")
+    cash_registers = []
+    is_empty = False
+    seen_paths = set()
+
+    if not os.path.exists(profiles_json_path):
+        return cash_registers, False, seen_paths
+
+    try:
+        with open(profiles_json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        profiles = data.get("profiles", {})
+        if not profiles:
+            is_empty = True
+        else:
+            for profile_id, profile in profiles.items():
+                exec_path = profile.get("local", {}).get("paths", {}).get("exec_path", "")
+                if exec_path and os.path.exists(exec_path):
+                    norm_path = os.path.normpath(exec_path).lower()
+                    seen_paths.add(norm_path)
+                    cash_registers.append({
+                        "path": norm_path,
+                        "source": "profiles_json"
+                    })
+    except Exception:
+        pass
+
+    return cash_registers, is_empty, seen_paths
 
 def get_cash_register_info(cash_path: str, is_external: bool = False) -> Dict:
     db_path = os.path.join(cash_path, "agent.db")
@@ -115,7 +154,7 @@ def get_cash_register_info(cash_path: str, is_external: bool = False) -> Dict:
             except Error:
                 time.sleep(2)
             finally:
-                if conn:
+                if 'conn' in locals():
                     conn.close()
                     time.sleep(0.1)
 
@@ -145,33 +184,35 @@ def check_cash_profiles(data: Dict):
 
         try:
             profiles_info = []
+            manager_dir = None
             target_folder = "checkbox.kasa.manager"
-            profiles_dir = None
 
+            # Find manager directory
             for drive in DRIVES:
                 path = f"{drive}\\{target_folder}"
-                profiles_path = os.path.join(path, "profiles")
-                if os.path.exists(profiles_path):
-                    profiles_dir = profiles_path
+                if os.path.exists(path):
+                    manager_dir = path
                     break
 
-            if profiles_dir:
-                profile_folders = [f for f in os.listdir(profiles_dir) if os.path.isdir(os.path.join(profiles_dir, f))]
-                if not profile_folders:
-                    print(f"{Fore.YELLOW}⚠ No profiles found in {profiles_dir}{Style.RESET_ALL}")
-                else:
-                    for profile in profile_folders:
-                        profile_path = os.path.join(profiles_dir, profile)
-                        profiles_info.append(get_cash_register_info(profile_path, is_external=False))
+            if manager_dir:
+                # Check profiles.json
+                cash_registers, is_empty, seen_paths = find_cash_registers_by_profiles_json(manager_dir)
+                if is_empty:
+                    print(f"{Fore.RED}! ! ! PROFILES.JSON ARE EMPTY ! ! !{Style.RESET_ALL}")
+
+                # Add cash registers from profiles.json (non-external)
+                for cash in cash_registers:
+                    profiles_info.append(get_cash_register_info(cash["path"], is_external=False))
+
+                # Always perform filesystem search to find additional cash registers
+                external_cashes = find_external_cash_registers_by_filesystem(manager_dir, seen_paths)
+                for cash in external_cashes:
+                    profiles_info.append(get_cash_register_info(cash["path"], is_external=True))
             else:
+                # If no manager directory, search for running processes
                 external_cashes = find_external_cash_registers_by_processes()
-                if external_cashes:
-                    for cash in external_cashes:
-                        profiles_info.append(get_cash_register_info(cash["path"], is_external=True))
-                else:
-                    external_cashes = find_external_cash_registers_by_filesystem()
-                    for cash in external_cashes:
-                        profiles_info.append(get_cash_register_info(cash["path"], is_external=True))
+                for cash in external_cashes:
+                    profiles_info.append(get_cash_register_info(cash["path"], is_external=True))
 
             stop_event.set()
             spinner_thread.join()
@@ -187,7 +228,7 @@ def check_cash_profiles(data: Dict):
                 trans_color = Fore.GREEN if profile["trans_status"] in ["DONE", "EMPTY"] else Fore.RED
                 shift_color = Fore.GREEN if profile["shift_status"] == "CLOSED" else Fore.RED
                 status_text = "ON" if profile["is_running"] else "OFF"
-                status_color = Fore.RED if profile["is_running"] else Fore.GREEN
+                status_color = Fore.GREEN if profile["is_running"] else Fore.RED
                 profile_str = (
                     f"| {Fore.YELLOW}FN: {profile['fiscal_number']}{Style.RESET_ALL} "
                     f"| {status_color}{status_text}{Style.RESET_ALL} "
@@ -393,29 +434,12 @@ def check_cash_profiles(data: Dict):
                                 print(f"{Fore.GREEN}✓ Config updated successfully!{Style.RESET_ALL}")
                             except Exception as e:
                                 print(f"{Fore.RED}✗ Error writing config.json: {e}{Style.RESET_ALL}")
-                                stop_event = threading.Event()
-                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Config error"))
-                                spinner_thread.start()
-                                time.sleep(2)
-                                stop_event.set()
-                                spinner_thread.join()
-                                if manager_suspended and manager_processes:
-                                    print(f"{Fore.YELLOW}▶ Resuming manager processes...{Style.RESET_ALL}")
-                                    for proc in manager_processes:
-                                        try:
-                                            proc.resume()
-                                            print(f"{Fore.GREEN}✓ Resumed kasa_manager.exe (PID: {proc.pid}){Style.RESET_ALL}")
-                                        except psutil.NoSuchProcess:
-                                            pass
-                                        except Exception:
-                                            pass
-                                    stop_event = threading.Event()
-                                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Processes resumed"))
-                                    spinner_thread.start()
-                                    time.sleep(1)
-                                    stop_event.set()
-                                    spinner_thread.join()
-                                continue
+                            stop_event = threading.Event()
+                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Config updated"))
+                            spinner_thread.start()
+                            time.sleep(5)
+                            stop_event.set()
+                            spinner_thread.join()
                         else:
                             print(f"{Fore.YELLOW}⚠ No changes made (empty inputs){Style.RESET_ALL}")
 
@@ -429,7 +453,7 @@ def check_cash_profiles(data: Dict):
                                 stop_event = threading.Event()
                                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Cash register launched"))
                                 spinner_thread.start()
-                                time.sleep(2)
+                                time.sleep(10)
                                 stop_event.set()
                                 spinner_thread.join()
                             except Exception as e:

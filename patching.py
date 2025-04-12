@@ -16,6 +16,86 @@ from utils import find_process_by_path, find_all_processes_by_name, manage_proce
 from network import download_file
 from backup_restore import create_backup, restore_from_backup, delete_backup
 
+def find_external_cash_registers_by_processes() -> list:
+    """
+    Finds cash registers by checking running processes for checkbox_kasa.exe.
+    """
+    external_cashes = []
+    seen_paths = set()
+
+    for proc in psutil.process_iter(['pid', 'exe', 'cwd']):
+        try:
+            if proc.name().lower() == "checkbox_kasa.exe":
+                proc_cwd = os.path.normpath(proc.cwd()).lower()
+                if proc_cwd not in seen_paths:
+                    seen_paths.add(proc_cwd)
+                    external_cashes.append({
+                        "path": proc_cwd,
+                        "source": "process"
+                    })
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    return external_cashes
+
+def find_external_cash_registers_by_filesystem(manager_dir: str, seen_paths: set) -> list:
+    """
+    Performs a recursive search for cash registers within the manager's profiles directory (depth of 2).
+    Excludes paths already seen to avoid duplicates.
+    """
+    external_cashes = []
+    import glob
+
+    pattern = os.path.join(manager_dir, "profiles", "*", "checkbox_kasa.exe")
+    try:
+        for kasa_exe in glob.glob(pattern, recursive=False):
+            kasa_dir = os.path.normpath(os.path.dirname(kasa_exe)).lower()
+            if kasa_dir not in seen_paths:
+                seen_paths.add(kasa_dir)
+                external_cashes.append({
+                    "path": kasa_dir,
+                    "source": "filesystem"
+                })
+    except Exception:
+        pass
+
+    return external_cashes
+
+def find_cash_registers_by_profiles_json(manager_dir: str) -> tuple[list, bool, set]:
+    """
+    Reads profiles.json to find cash register locations.
+    Returns a list of cash registers, a boolean indicating if the file is empty, and a set of seen paths.
+    """
+    profiles_json_path = os.path.join(manager_dir, "profiles.json")
+    cash_registers = []
+    is_empty = False
+    seen_paths = set()
+    import json
+
+    if not os.path.exists(profiles_json_path):
+        return cash_registers, False, seen_paths
+
+    try:
+        with open(profiles_json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        profiles = data.get("profiles", {})
+        if not profiles:
+            is_empty = True
+        else:
+            for profile_id, profile in profiles.items():
+                exec_path = profile.get("local", {}).get("paths", {}).get("exec_path", "")
+                if exec_path and os.path.exists(exec_path):
+                    norm_path = os.path.normpath(exec_path).lower()
+                    seen_paths.add(norm_path)
+                    cash_registers.append({
+                        "path": norm_path,
+                        "source": "profiles_json"
+                    })
+    except Exception:
+        pass
+
+    return cash_registers, is_empty, seen_paths
+
 def install_file(file_data: Dict, paylink_patch_data: Optional[Dict] = None, data: Optional[Dict] = None) -> bool:
     filename = file_data["name"]
     url = file_data["url"]
@@ -180,20 +260,255 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
         print(f"{Fore.GREEN}✓ Found installation directory: {install_dir}{Style.RESET_ALL}")
 
         if is_rro_agent:
-            profiles_dir = os.path.join(install_dir, "profiles")
-            if not os.path.exists(profiles_dir):
-                print(f"{Fore.RED}✗ Profiles folder not found in {install_dir}.{Style.RESET_ALL}")
-                stop_event = threading.Event()
-                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Profiles not found"))
-                spinner_thread.start()
-                time.sleep(2)
-                stop_event.set()
-                spinner_thread.join()
-                return False
+            # Search for cash registers
+            profiles_info = []
+            manager_dir = install_dir
 
-            profile_folders = [f for f in os.listdir(profiles_dir) if os.path.isdir(os.path.join(profiles_dir, f))]
-            if not profile_folders:
-                print(f"{Fore.RED}✗ No profiles found in {profiles_dir}.{Style.RESET_ALL}")
+            stop_event = threading.Event()
+            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Searching cash registers"))
+            spinner_thread.start()
+
+            if manager_dir:
+                # Check profiles.json
+                cash_registers, is_empty, seen_paths = find_cash_registers_by_profiles_json(manager_dir)
+                if is_empty:
+                    print(f"{Fore.RED}! ! ! PROFILES.JSON ARE EMPTY ! ! !{Style.RESET_ALL}")
+
+                # Add cash registers from profiles.json (non-external)
+                for cash in cash_registers:
+                    db_path = os.path.join(cash["path"], "agent.db")
+                    version = "Unknown"
+                    fiscal_number = "Unknown"
+                    health = "BAD"
+                    trans_status = "ERROR"
+                    shift_status = "OPENED"
+                    is_running = bool(find_process_by_path("checkbox_kasa.exe", cash["path"]))
+
+                    try:
+                        version_path = os.path.join(cash["path"], "version")
+                        if os.path.exists(version_path):
+                            with open(version_path, "r", encoding="utf-8") as f:
+                                version = f.read().strip()
+                    except Exception:
+                        pass
+
+                    if os.path.exists(db_path):
+                        try:
+                            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
+                            cursor = conn.cursor()
+                            cursor.execute("SELECT fiscal_number FROM cash_register LIMIT 1;")
+                            result = cursor.fetchone()
+                            if result and result[0]:
+                                fiscal_number = result[0]
+                            conn.close()
+                        except Exception:
+                            pass
+
+                        for attempt in range(3):
+                            try:
+                                conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
+                                cursor = conn.cursor()
+
+                                cursor.execute("PRAGMA integrity_check;")
+                                result = cursor.fetchone()[0]
+                                if result == "ok":
+                                    health = "OK"
+                                    cursor.execute("SELECT status FROM transactions;")
+                                    statuses = [row[0] for row in cursor.fetchall()]
+                                    if not statuses:
+                                        trans_status = "EMPTY"
+                                    elif any(s == "ERROR" for s in statuses):
+                                        trans_status = "ERROR"
+                                    elif any(s == "PENDING" for s in statuses):
+                                        trans_status = "PENDING"
+                                    else:
+                                        trans_status = "DONE"
+
+                                    cursor.execute("SELECT status FROM shifts WHERE id = (SELECT MAX(id) FROM shifts);")
+                                    shift_result = cursor.fetchone()
+                                    if shift_result:
+                                        shift_status = shift_result[0].upper()
+                                    else:
+                                        shift_status = "CLOSED"
+                                break
+                            except Exception:
+                                time.sleep(1)
+                            finally:
+                                if 'conn' in locals():
+                                    conn.close()
+                                    time.sleep(0.1)
+
+                    profiles_info.append({
+                        "name": os.path.basename(cash["path"]),
+                        "path": cash["path"],
+                        "health": health,
+                        "trans_status": trans_status,
+                        "shift_status": shift_status,
+                        "version": version,
+                        "fiscal_number": fiscal_number,
+                        "is_running": is_running,
+                        "is_external": False
+                    })
+
+                # Perform filesystem search to find additional cash registers
+                external_cashes = find_external_cash_registers_by_filesystem(manager_dir, seen_paths)
+                for cash in external_cashes:
+                    db_path = os.path.join(cash["path"], "agent.db")
+                    version = "Unknown"
+                    fiscal_number = "Unknown"
+                    health = "BAD"
+                    trans_status = "ERROR"
+                    shift_status = "OPENED"
+                    is_running = bool(find_process_by_path("checkbox_kasa.exe", cash["path"]))
+
+                    try:
+                        version_path = os.path.join(cash["path"], "version")
+                        if os.path.exists(version_path):
+                            with open(version_path, "r", encoding="utf-8") as f:
+                                version = f.read().strip()
+                    except Exception:
+                        pass
+
+                    if os.path.exists(db_path):
+                        try:
+                            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
+                            cursor = conn.cursor()
+                            cursor.execute("SELECT fiscal_number FROM cash_register LIMIT 1;")
+                            result = cursor.fetchone()
+                            if result and result[0]:
+                                fiscal_number = result[0]
+                            conn.close()
+                        except Exception:
+                            pass
+
+                        for attempt in range(3):
+                            try:
+                                conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
+                                cursor = conn.cursor()
+
+                                cursor.execute("PRAGMA integrity_check;")
+                                result = cursor.fetchone()[0]
+                                if result == "ok":
+                                    health = "OK"
+                                    cursor.execute("SELECT status FROM transactions;")
+                                    statuses = [row[0] for row in cursor.fetchall()]
+                                    if not statuses:
+                                        trans_status = "EMPTY"
+                                    elif any(s == "ERROR" for s in statuses):
+                                        trans_status = "ERROR"
+                                    elif any(s == "PENDING" for s in statuses):
+                                        trans_status = "PENDING"
+                                    else:
+                                        trans_status = "DONE"
+
+                                    cursor.execute("SELECT status FROM shifts WHERE id = (SELECT MAX(id) FROM shifts);")
+                                    shift_result = cursor.fetchone()
+                                    if shift_result:
+                                        shift_status = shift_result[0].upper()
+                                    else:
+                                        shift_status = "CLOSED"
+                                break
+                            except Exception:
+                                time.sleep(1)
+                            finally:
+                                if 'conn' in locals():
+                                    conn.close()
+                                    time.sleep(0.1)
+
+                    profiles_info.append({
+                        "name": f"[External] {os.path.basename(cash['path'])}",
+                        "path": cash["path"],
+                        "health": health,
+                        "trans_status": trans_status,
+                        "shift_status": shift_status,
+                        "version": version,
+                        "fiscal_number": fiscal_number,
+                        "is_running": is_running,
+                        "is_external": True
+                    })
+            else:
+                # If no manager directory, search for running processes
+                external_cashes = find_external_cash_registers_by_processes()
+                for cash in external_cashes:
+                    db_path = os.path.join(cash["path"], "agent.db")
+                    version = "Unknown"
+                    fiscal_number = "Unknown"
+                    health = "BAD"
+                    trans_status = "ERROR"
+                    shift_status = "OPENED"
+                    is_running = bool(find_process_by_path("checkbox_kasa.exe", cash["path"]))
+
+                    try:
+                        version_path = os.path.join(cash["path"], "version")
+                        if os.path.exists(version_path):
+                            with open(version_path, "r", encoding="utf-8") as f:
+                                version = f.read().strip()
+                    except Exception:
+                        pass
+
+                    if os.path.exists(db_path):
+                        try:
+                            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
+                            cursor = conn.cursor()
+                            cursor.execute("SELECT fiscal_number FROM cash_register LIMIT 1;")
+                            result = cursor.fetchone()
+                            if result and result[0]:
+                                fiscal_number = result[0]
+                            conn.close()
+                        except Exception:
+                            pass
+
+                        for attempt in range(3):
+                            try:
+                                conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
+                                cursor = conn.cursor()
+
+                                cursor.execute("PRAGMA integrity_check;")
+                                result = cursor.fetchone()[0]
+                                if result == "ok":
+                                    health = "OK"
+                                    cursor.execute("SELECT status FROM transactions;")
+                                    statuses = [row[0] for row in cursor.fetchall()]
+                                    if not statuses:
+                                        trans_status = "EMPTY"
+                                    elif any(s == "ERROR" for s in statuses):
+                                        trans_status = "ERROR"
+                                    elif any(s == "PENDING" for s in statuses):
+                                        trans_status = "PENDING"
+                                    else:
+                                        trans_status = "DONE"
+
+                                    cursor.execute("SELECT status FROM shifts WHERE id = (SELECT MAX(id) FROM shifts);")
+                                    shift_result = cursor.fetchone()
+                                    if shift_result:
+                                        shift_status = shift_result[0].upper()
+                                    else:
+                                        shift_status = "CLOSED"
+                                break
+                            except Exception:
+                                time.sleep(1)
+                            finally:
+                                if 'conn' in locals():
+                                    conn.close()
+                                    time.sleep(0.1)
+
+                    profiles_info.append({
+                        "name": f"[External] {os.path.basename(cash['path'])}",
+                        "path": cash["path"],
+                        "health": health,
+                        "trans_status": trans_status,
+                        "shift_status": shift_status,
+                        "version": version,
+                        "fiscal_number": fiscal_number,
+                        "is_running": is_running,
+                        "is_external": True
+                    })
+
+            stop_event.set()
+            spinner_thread.join()
+
+            if not profiles_info:
+                print(f"{Fore.RED}✗ No profiles found in {install_dir}.{Style.RESET_ALL}")
                 stop_event = threading.Event()
                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "No profiles"))
                 spinner_thread.start()
@@ -201,81 +516,6 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                 stop_event.set()
                 spinner_thread.join()
                 return False
-
-            profiles_info = []
-            for profile in profile_folders:
-                profile_path = os.path.join(profiles_dir, profile)
-                db_path = os.path.join(profile_path, "agent.db")
-                version = "Unknown"
-                fiscal_number = "Unknown"
-
-                try:
-                    if os.path.exists(os.path.join(profile_path, "version")):
-                        with open(os.path.join(profile_path, "version"), "r", encoding="utf-8") as f:
-                            version = f.read().strip()
-                except Exception:
-                    pass
-
-                try:
-                    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT fiscal_number FROM cash_register LIMIT 1;")
-                    result = cursor.fetchone()
-                    if result and result[0]:
-                        fiscal_number = result[0]
-                    conn.close()
-                except Exception:
-                    pass
-
-                health = "BAD"
-                trans_status = "ERROR"
-                shift_status = "OPENED"
-                conn = None
-                for attempt in range(3):
-                    try:
-                        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
-                        cursor = conn.cursor()
-
-                        cursor.execute("PRAGMA integrity_check;")
-                        result = cursor.fetchone()[0]
-                        if result == "ok":
-                            health = "OK"
-                            cursor.execute("SELECT status FROM transactions;")
-                            statuses = [row[0] for row in cursor.fetchall()]
-                            if not statuses:
-                                trans_status = "EMPTY"
-                            elif any(s == "ERROR" for s in statuses):
-                                trans_status = "ERROR"
-                            elif any(s == "PENDING" for s in statuses):
-                                trans_status = "PENDING"
-                            else:
-                                trans_status = "DONE"
-
-                            cursor.execute("SELECT status FROM shifts WHERE id = (SELECT MAX(id) FROM shifts);")
-                            shift_result = cursor.fetchone()
-                            if shift_result:
-                                shift_status = shift_result[0].upper()
-                            else:
-                                shift_status = "CLOSED"
-                        break
-                    except Exception:
-                        time.sleep(1)
-                    finally:
-                        if conn:
-                            conn.close()
-                            time.sleep(0.1)
-
-                is_running = bool(find_process_by_path("checkbox_kasa.exe", profile_path))
-                profiles_info.append({
-                    "name": profile,
-                    "path": profile_path,
-                    "health": health,
-                    "trans_status": trans_status,
-                    "shift_status": shift_status,
-                    "version": version,
-                    "fiscal_number": fiscal_number,
-                    "is_running": is_running
-                })
 
             while True:
                 os.system("cls")
@@ -298,10 +538,11 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                         f"| v{profile['version']}"
                     )
                     print(f"{Fore.WHITE}{i}. {profile['name']} {profile_str}{Style.RESET_ALL}")
-                print(f"\n{Fore.WHITE}{len(profile_folders) + 1}. All profiles{Style.RESET_ALL}")
+                print(f"\n{Fore.WHITE}{len(profiles_info) + 1}. All profiles{Style.RESET_ALL}")
                 print(f"{Fore.WHITE}0. Back{Style.RESET_ALL}")
                 print(f"{Fore.WHITE}Q. Exit{Style.RESET_ALL}")
 
+                profiles_dir = os.path.join(install_dir, "profiles")
                 backup_files = [f for f in os.listdir(profiles_dir) if f.endswith(".zip") and "backup" in f.lower()]
                 if backup_files:
                     print(f"\n{Fore.YELLOW}Available backups:{Style.RESET_ALL}")
@@ -425,7 +666,7 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                         stop_event.set()
                         spinner_thread.join()
                         return False
-                    elif 1 <= choice_int <= len(profile_folders):
+                    elif 1 <= choice_int <= len(profiles_info):
                         selected_profile = profiles_info[choice_int - 1]
                         if selected_profile["health"] == "BAD":
                             print(f"{Fore.RED}✗ Cannot update {selected_profile['name']}: Database corrupted.{Style.RESET_ALL}")
@@ -438,7 +679,7 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                             continue
                         target_dirs = [selected_profile["path"]]
                         break
-                    elif choice_int == len(profile_folders) + 1:
+                    elif choice_int == len(profiles_info) + 1:
                         for profile in profiles_info:
                             if profile["health"] == "BAD":
                                 print(f"{Fore.RED}✗ Cannot update all profiles: {profile['name']} database corrupted.{Style.RESET_ALL}")
