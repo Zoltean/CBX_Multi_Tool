@@ -9,6 +9,7 @@ from sqlite3 import Error
 from typing import Dict, Optional
 import json
 import requests
+import glob
 
 import psutil
 from colorama import Fore, Style
@@ -17,6 +18,159 @@ from config import DRIVES
 from utils import show_spinner, find_process_by_path, find_all_processes_by_name
 
 logger = logging.getLogger(__name__)
+
+def find_external_cash_registers_by_processes() -> list:
+    """
+    Ищет кассы по запущенным процессам checkbox_kasa.exe.
+
+    Returns:
+        list: Список словарей с информацией о кассах, найденных по процессам.
+    """
+    external_cashes = []
+    seen_paths = set()
+
+    for proc in psutil.process_iter(['pid', 'exe', 'cwd']):
+        try:
+            if proc.name().lower() == "checkbox_kasa.exe":
+                proc_cwd = os.path.normpath(proc.cwd()).lower()
+                if proc_cwd not in seen_paths:
+                    seen_paths.add(proc_cwd)
+                    external_cashes.append({
+                        "path": proc_cwd,
+                        "source": "process"
+                    })
+                    logger.info(f"Found external cash register via process at {proc_cwd}")
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    return external_cashes
+
+def find_external_cash_registers_by_filesystem() -> list:
+    """
+    Ищет кассы по файловой системе с ограничением на глубину 1 от корня диска.
+
+    Returns:
+        list: Список словарей с информацией о кассах, найденных по файлам.
+    """
+    external_cashes = []
+    seen_paths = set()
+
+    for drive in DRIVES:
+        try:
+            # Ищем checkbox_kasa.exe только на глубине 1
+            pattern = os.path.join(drive, "*", "*", "checkbox_kasa.exe")
+            for kasa_exe in glob.glob(pattern, recursive=False):
+                kasa_dir = os.path.normpath(os.path.dirname(kasa_exe)).lower()
+                if kasa_dir not in seen_paths:
+                    seen_paths.add(kasa_dir)
+                    external_cashes.append({
+                        "path": kasa_dir,
+                        "source": "filesystem"
+                    })
+                    logger.info(f"Found external cash register via filesystem at {kasa_dir}")
+        except Exception as e:
+            logger.warning(f"Error searching in {drive}: {e}")
+
+    return external_cashes
+
+def get_cash_register_info(cash_path: str, is_external: bool = False) -> Dict:
+    """
+    Собирает информацию о кассе по её пути.
+
+    Args:
+        cash_path (str): Путь к папке кассы.
+        is_external (bool): Является ли касса внешней.
+
+    Returns:
+        Dict: Информация о кассе (имя, здоровье, статусы и т.д.).
+    """
+    db_path = os.path.join(cash_path, "agent.db")
+    version = "Unknown"
+    fiscal_number = "Unknown"
+    health = "BAD"
+    trans_status = "ERROR"
+    shift_status = "OPENED"
+    is_running = bool(find_process_by_path("checkbox_kasa.exe", cash_path))
+
+    # Проверяем файл version
+    try:
+        version_path = os.path.join(cash_path, "version")
+        if os.path.exists(version_path):
+            with open(version_path, "r", encoding="utf-8") as f:
+                version = f.read().strip()
+    except Exception as e:
+        logger.error(f"Failed to read version file for cash at {cash_path}: {e}")
+
+    # Проверяем базу данных
+    if os.path.exists(db_path):
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
+            cursor = conn.cursor()
+            cursor.execute("SELECT fiscal_number FROM cash_register LIMIT 1;")
+            result = cursor.fetchone()
+            if result and result[0]:
+                fiscal_number = result[0]
+            else:
+                logger.debug(f"No fiscal_number found for cash at {cash_path}")
+            conn.close()
+        except Error as e:
+            logger.error(f"Failed to fetch fiscal_number for cash at {cash_path}: {e}")
+
+        for attempt in range(3):
+            try:
+                conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
+                cursor = conn.cursor()
+
+                cursor.execute("PRAGMA integrity_check;")
+                result = cursor.fetchone()[0]
+                if result == "ok":
+                    health = "OK"
+                    logger.info(f"Database {db_path} is healthy")
+
+                    cursor.execute("SELECT status FROM transactions;")
+                    statuses = [row[0] for row in cursor.fetchall()]
+                    if not statuses:
+                        trans_status = "EMPTY"
+                    elif any(s == "ERROR" for s in statuses):
+                        trans_status = "ERROR"
+                    elif any(s == "PENDING" for s in statuses):
+                        trans_status = "PENDING"
+                    else:
+                        trans_status = "DONE"
+                    logger.info(f"Transactions status for cash at {cash_path}: {trans_status}")
+
+                    cursor.execute("SELECT status FROM shifts WHERE id = (SELECT MAX(id) FROM shifts);")
+                    shift_result = cursor.fetchone()
+                    if shift_result:
+                        shift_status = shift_result[0].upper()
+                        logger.info(f"Shift status for cash at {cash_path}: {shift_status}")
+                    else:
+                        logger.debug(f"No shifts found for cash at {cash_path}")
+                        shift_status = "CLOSED"
+                break
+            except Error as e:
+                logger.warning(f"Attempt {attempt + 1}/3 failed to connect to {db_path}: {e}")
+                if attempt == 2:
+                    logger.error(f"All attempts failed for {db_path}: {e}")
+                time.sleep(1)
+            finally:
+                if conn:
+                    conn.close()
+                    logger.debug(f"Closed connection to {db_path}")
+                    time.sleep(0.1)
+
+    name = f"[External] {os.path.basename(cash_path)}" if is_external else os.path.basename(cash_path)
+    return {
+        "name": name,
+        "path": cash_path,
+        "health": health,
+        "trans_status": trans_status,
+        "shift_status": shift_status,
+        "version": version,
+        "fiscal_number": fiscal_number,
+        "is_running": is_running,
+        "is_external": is_external
+    }
 
 def check_cash_profiles(data: Dict, api_handler=None):
     """
@@ -40,8 +194,11 @@ def check_cash_profiles(data: Dict, api_handler=None):
         spinner_thread.start()
 
         try:
+            profiles_info = []
             target_folder = "checkbox.kasa.manager"
             profiles_dir = None
+
+            # 1. Проверяем наличие папки менеджера
             for drive in DRIVES:
                 path = f"{drive}\\{target_folder}"
                 profiles_path = os.path.join(path, "profiles")
@@ -49,115 +206,42 @@ def check_cash_profiles(data: Dict, api_handler=None):
                     profiles_dir = profiles_path
                     break
 
-            if not profiles_dir:
-                logger.error(f"Profiles folder not found for {target_folder}")
-                print(f"{Fore.RED}Error: Profiles folder not found on any drive!{Style.RESET_ALL}")
+            if profiles_dir:
+                # Если менеджер найден, ищем только внутри profiles
+                logger.info(f"Manager folder found at {profiles_dir}, searching profiles only")
+                profile_folders = [f for f in os.listdir(profiles_dir) if os.path.isdir(os.path.join(profiles_dir, f))]
+                if not profile_folders:
+                    logger.warning(f"No profile folders found in {profiles_dir}")
+                    print(f"{Fore.YELLOW}No profiles found in {profiles_dir}{Style.RESET_ALL}")
+                else:
+                    for profile in profile_folders:
+                        profile_path = os.path.join(profiles_dir, profile)
+                        profiles_info.append(get_cash_register_info(profile_path, is_external=False))
+            else:
+                # Если менеджер не найден, ищем процессы
+                logger.info("Manager folder not found, searching for processes")
+                external_cashes = find_external_cash_registers_by_processes()
+                if external_cashes:
+                    for cash in external_cashes:
+                        profiles_info.append(get_cash_register_info(cash["path"], is_external=True))
+                else:
+                    # Если процессы не найдены, ищем по файловой системе
+                    logger.info("No processes found, searching filesystem")
+                    external_cashes = find_external_cash_registers_by_filesystem()
+                    for cash in external_cashes:
+                        profiles_info.append(get_cash_register_info(cash["path"], is_external=True))
+
+            if not profiles_info:
+                logger.error("No profiles or external cash registers found")
+                print(f"{Fore.RED}Error: No profiles or external cash registers found!{Style.RESET_ALL}")
                 stop_event.set()
                 spinner_thread.join()
                 input("Press Enter to continue...")
                 return
 
-            profile_folders = [f for f in os.listdir(profiles_dir) if os.path.isdir(os.path.join(profiles_dir, f))]
-            if not profile_folders:
-                logger.error(f"No profile folders found in {profiles_dir}")
-                print(f"{Fore.RED}Error: No profile folders found in {profiles_dir}!{Style.RESET_ALL}")
-                stop_event.set()
-                spinner_thread.join()
-                input("Press Enter to continue...")
-                return
-
-            logger.info(f"Found profiles: {profile_folders}")
+            logger.info(f"Total profiles found: {len(profiles_info)}")
             stop_event.set()
             spinner_thread.join()
-
-            # Собираем информацию о профилях
-            profiles_info = []
-            for profile in profile_folders:
-                profile_path = os.path.join(profiles_dir, profile)
-                db_path = os.path.join(profile_path, "agent.db")
-                version = "Unknown"
-                fiscal_number = "Unknown"
-
-                try:
-                    if os.path.exists(os.path.join(profile_path, "version")):
-                        with open(os.path.join(profile_path, "version"), "r", encoding="utf-8") as f:
-                            version = f.read().strip()
-                except Exception as e:
-                    logger.error(f"Failed to read version file for {profile}: {e}")
-
-                try:
-                    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT fiscal_number FROM cash_register LIMIT 1;")
-                    result = cursor.fetchone()
-                    if result and result[0]:
-                        fiscal_number = result[0]
-                    else:
-                        logger.debug(f"No fiscal_number found for {profile}")
-                    conn.close()
-                except Error as e:
-                    logger.error(f"Failed to fetch fiscal_number for {profile}: {e}")
-
-                health = "BAD"
-                trans_status = "ERROR"
-                shift_status = "OPENED"
-                conn = None
-                for attempt in range(3):  # 3 попытки подключения
-                    try:
-                        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
-                        cursor = conn.cursor()
-
-                        cursor.execute("PRAGMA integrity_check;")
-                        result = cursor.fetchone()[0]
-                        if result == "ok":
-                            health = "OK"
-                            logger.info(f"Database {db_path} is healthy")
-
-                            cursor.execute("SELECT status FROM transactions;")
-                            statuses = [row[0] for row in cursor.fetchall()]
-                            if not statuses:
-                                trans_status = "EMPTY"
-                            elif any(s == "ERROR" for s in statuses):
-                                trans_status = "ERROR"
-                            elif any(s == "PENDING" for s in statuses):
-                                trans_status = "PENDING"
-                            else:
-                                trans_status = "DONE"
-                            logger.info(f"Transactions status for {profile}: {trans_status}")
-
-                            cursor.execute("SELECT status FROM shifts WHERE id = (SELECT MAX(id) FROM shifts);")
-                            shift_result = cursor.fetchone()
-                            if shift_result:
-                                shift_status = shift_result[0].upper()
-                                logger.info(f"Shift status for {profile}: {shift_status}")
-                            else:
-                                logger.debug(f"No shifts found in {profile}")
-                                shift_status = "CLOSED"
-                        break  # Успешное подключение
-                    except Error as e:
-                        logger.warning(f"Attempt {attempt + 1}/3 failed to connect to {db_path}: {e}")
-                        if attempt == 2:
-                            logger.error(f"All attempts failed for {db_path}: {e}")
-                        time.sleep(1)
-                    finally:
-                        if conn:
-                            conn.close()
-                            logger.debug(f"Closed connection to {db_path}")
-                            time.sleep(0.1)
-
-                # Проверяем, запущен ли процесс checkbox_kasa.exe
-                is_running = bool(find_process_by_path("checkbox_kasa.exe", profile_path))
-
-                profiles_info.append({
-                    "name": profile,
-                    "path": profile_path,
-                    "health": health,
-                    "trans_status": trans_status,
-                    "shift_status": shift_status,
-                    "version": version,
-                    "fiscal_number": fiscal_number,
-                    "is_running": is_running
-                })
 
             # Выводим профили с номерами
             print(f"{Fore.CYAN}Available profiles:{Style.RESET_ALL}")
@@ -178,12 +262,10 @@ def check_cash_profiles(data: Dict, api_handler=None):
                 )
                 print(f"{i}. {Fore.CYAN}{profile['name']}{Style.RESET_ALL} {profile_str}")
             print()
-            print(f"Use 'R<number>' to refresh shift, 'C<number>' to update config, or 0 to go back")
-            print(f"0. Back")
             print(f"{Fore.CYAN}{'=' * 40}{Style.RESET_ALL}")
 
             # Запрашиваем выбор пользователя
-            choice = input("Select a profile, R<number>, C<number>, or 0 to go back: ").strip()
+            choice = input("Use 'R<number>' to refresh shift, 'C<number>' to update config, 'O<number>' to open folder, or 0 to go back: ").strip()
             logger.info(f"User input in profile selection: {choice}")
 
             if choice == "0":
@@ -197,7 +279,54 @@ def check_cash_profiles(data: Dict, api_handler=None):
                 spinner_thread.join()
                 return
 
-            # Проверяем, является ли ввод командой C<number>
+            # Проверяем команду O<number> (открытие папки)
+            if choice.lower().startswith("o") and len(choice) > 1:
+                try:
+                    profile_num = int(choice[1:])  # Извлекаем число после 'O'
+                    if 1 <= profile_num <= len(profiles_info):
+                        selected_profile = profiles_info[profile_num - 1]
+                        logger.info(f"User chose to open folder for profile: {selected_profile['name']}")
+                        folder_path = selected_profile['path']
+                        if os.path.exists(folder_path):
+                            try:
+                                os.startfile(folder_path)  # Открываем папку в проводнике
+                                logger.info(f"Opened folder {folder_path} in explorer")
+                                print(f"{Fore.GREEN}Opened folder {folder_path} in explorer!{Style.RESET_ALL}")
+                            except Exception as e:
+                                logger.error(f"Failed to open folder {folder_path}: {e}")
+                                print(f"{Fore.RED}Failed to open folder: {e}{Style.RESET_ALL}")
+                        else:
+                            logger.error(f"Folder not found: {folder_path}")
+                            print(f"{Fore.RED}Folder not found: {folder_path}{Style.RESET_ALL}")
+                        stop_event = threading.Event()
+                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Folder opened"))
+                        spinner_thread.start()
+                        time.sleep(2)
+                        stop_event.set()
+                        spinner_thread.join()
+                        continue
+                    else:
+                        logger.warning(f"Invalid profile number for open folder: {choice}")
+                        print(f"{Fore.RED}Invalid profile number!{Style.RESET_ALL}")
+                        stop_event = threading.Event()
+                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid choice"))
+                        spinner_thread.start()
+                        time.sleep(2)
+                        stop_event.set()
+                        spinner_thread.join()
+                        continue
+                except ValueError:
+                    logger.warning(f"Invalid open folder command format: {choice}")
+                    print(f"{Fore.RED}Invalid open folder command format! Use O<number> (e.g., O1){Style.RESET_ALL}")
+                    stop_event = threading.Event()
+                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid input"))
+                    spinner_thread.start()
+                    time.sleep(2)
+                    stop_event.set()
+                    spinner_thread.join()
+                    continue
+
+            # Проверяем команду C<number> (обновление конфига)
             if choice.lower().startswith("c") and len(choice) > 1:
                 try:
                     profile_num = int(choice[1:])  # Извлекаем число после 'C'
@@ -282,7 +411,7 @@ def check_cash_profiles(data: Dict, api_handler=None):
                             time.sleep(2)
                             stop_event.set()
                             spinner_thread.join()
-                            # Размораживаем менеджер, если он был заморожен
+                            # Размораживаем менеджер
                             if manager_suspended and manager_processes:
                                 print(f"{Fore.YELLOW}Resuming all manager processes...{Style.RESET_ALL}")
                                 for proc in manager_processes:
@@ -334,7 +463,7 @@ def check_cash_profiles(data: Dict, api_handler=None):
                                 spinner_thread.join()
                             continue
 
-                        # Обновляем provider, если предоставлены значения
+                        # Обновляем provider
                         provider = config.get("provider", {})
                         updated = False
                         if license_key:
@@ -347,7 +476,7 @@ def check_cash_profiles(data: Dict, api_handler=None):
                             logger.info(f"Updated pin_code to {pin_code}")
                         config["provider"] = provider
 
-                        # Сохраняем config.json, только если были изменения
+                        # Сохраняем config.json
                         if updated:
                             try:
                                 with open(config_path, "w", encoding="utf-8") as f:
@@ -441,7 +570,7 @@ def check_cash_profiles(data: Dict, api_handler=None):
                                 spinner_thread.join()
                             continue
 
-                        # Размораживаем менеджер, если он был заморожен
+                        # Размораживаем менеджер
                         if manager_suspended and manager_processes:
                             print(f"{Fore.YELLOW}Resuming all manager processes...{Style.RESET_ALL}")
                             for proc in manager_processes:
@@ -490,7 +619,7 @@ def check_cash_profiles(data: Dict, api_handler=None):
                     spinner_thread.join()
                     continue
 
-            # Проверяем, является ли ввод командой R<number>
+            # Проверяем команду R<number> (обновление смены)
             if choice.lower().startswith("r") and len(choice) > 1:
                 try:
                     profile_num = int(choice[1:])  # Извлекаем число после 'R'
@@ -528,7 +657,7 @@ def check_cash_profiles(data: Dict, api_handler=None):
                             spinner_thread.join()
                             continue
 
-                        # Формируем URL и отправляем POST-запрос
+                        # Отправляем POST-запрос для обновления смены
                         url = f"http://{host}:{port}/api/v1/shift/refresh"
                         try:
                             response = requests.post(url, timeout=5)
@@ -574,7 +703,7 @@ def check_cash_profiles(data: Dict, api_handler=None):
                     selected_profile = profiles_info[choice_int - 1]
                     logger.info(f"User selected profile: {selected_profile['name']}")
 
-                    # Убиваем процесс кассы, если он запущен
+                    # Убиваем процесс кассы
                     kasa_process = find_process_by_path("checkbox_kasa.exe", selected_profile['path'])
                     if kasa_process:
                         try:
@@ -613,7 +742,7 @@ def check_cash_profiles(data: Dict, api_handler=None):
                         stop_event.set()
                         spinner_thread.join()
 
-                    # Запускаем кассу в отдельной консоли
+                    # Запускаем кассу
                     kasa_path = os.path.join(selected_profile['path'], "checkbox_kasa.exe")
                     if os.path.exists(kasa_path):
                         try:
@@ -636,8 +765,7 @@ def check_cash_profiles(data: Dict, api_handler=None):
                         logger.warning(f"checkbox_kasa.exe not found in {selected_profile['path']}")
                         print(f"{Fore.YELLOW}checkbox_kasa.exe not found in {selected_profile['path']}{Style.RESET_ALL}")
 
-                    # Ждём 3 секунды и размораживаем менеджер
-                    time.sleep(3)
+                    # Размораживаем менеджер
                     if manager_processes:
                         print(f"{Fore.YELLOW}Resuming all manager processes...{Style.RESET_ALL}")
                         for proc in manager_processes:
@@ -656,7 +784,7 @@ def check_cash_profiles(data: Dict, api_handler=None):
                         stop_event.set()
                         spinner_thread.join()
 
-                    # Возвращаемся в меню "H" (continue перезапустит цикл)
+                    # Возвращаемся в меню
                     print(f"{Fore.GREEN}Returning to cash register health check...{Style.RESET_ALL}")
                     stop_event = threading.Event()
                     spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Returning"))
