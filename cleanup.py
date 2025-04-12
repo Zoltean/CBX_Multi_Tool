@@ -96,7 +96,7 @@ def cleanup(data: Dict):
         for thread in threading.enumerate():
             if thread is not threading.current_thread() and thread.is_alive():
                 logger.info(f"Waiting for thread {thread.name} to finish")
-                thread.join(timeout=2.0)
+                thread.join(timeout=0.1)
 
         logger.info("Scheduling script self-deletion via batch file")
         print(f"{Fore.GREEN}Cleanup completed! Scheduling self-deletion...{Style.RESET_ALL}")

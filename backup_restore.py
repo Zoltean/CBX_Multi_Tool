@@ -38,7 +38,7 @@ def create_backup(target_dir: str) -> Optional[str]:
         stop_event = threading.Event()
         spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Backup created"))
         spinner_thread.start()
-        time.sleep(2)
+        time.sleep(1)
         stop_event.set()
         spinner_thread.join()
         return backup_path
@@ -63,7 +63,7 @@ def delete_backup(backup_path: str) -> bool:
         stop_event = threading.Event()
         spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Backup deleted"))
         spinner_thread.start()
-        time.sleep(2)
+        time.sleep(1)
         stop_event.set()
         spinner_thread.join()
         return True
@@ -129,7 +129,7 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
                     logger.warning(f"{proc.info['name']} (PID: {proc.pid}) already terminated")
                 except Exception as e:
                     logger.error(f"Failed to kill process {proc.info['name']} (PID: {proc.pid}): {e}")
-            time.sleep(1)
+            time.sleep(2)
         else:
             logger.info("User declined to kill processes, aborting restore")
             print(f"{Fore.RED}Restoration aborted by user.{Style.RESET_ALL}")
@@ -158,7 +158,7 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
                     logger.warning(f"kasa_manager.exe (PID: {proc.pid}) already terminated")
                 except Exception as e:
                     logger.error(f"Failed to suspend kasa_manager.exe (PID: {proc.pid}): {e}")
-            time.sleep(1)
+            time.sleep(2)
     elif is_rro_agent and manager_running:
         logger.info("Cash register not running, manager running - proceeding without suspending manager")
         print(
@@ -221,7 +221,7 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
                 stop_event = threading.Event()
                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Cash register launched"))
                 spinner_thread.start()
-                time.sleep(5)
+                time.sleep(10)
                 stop_event.set()
                 spinner_thread.join()
             else:

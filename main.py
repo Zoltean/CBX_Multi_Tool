@@ -38,12 +38,12 @@ def main():
             stop_event = threading.Event()
             spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Checking privileges"))
             spinner_thread.start()
-            time.sleep(3)
+            time.sleep(2)
             stop_event.set()
             spinner_thread.join()
         else:
             print(f"{Fore.GREEN}Running with admin privileges.{Style.RESET_ALL}")
-            time.sleep(1)
+            time.sleep(0)
 
         update_available, download_url = check_for_updates()
 

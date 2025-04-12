@@ -153,7 +153,7 @@ def get_cash_register_info(cash_path: str, is_external: bool = False) -> Dict:
                 logger.warning(f"Attempt {attempt + 1}/3 failed to connect to {db_path}: {e}")
                 if attempt == 2:
                     logger.error(f"All attempts failed for {db_path}: {e}")
-                time.sleep(1)
+                time.sleep(2)
             finally:
                 if conn:
                     conn.close()
@@ -288,7 +288,7 @@ def check_cash_profiles(data: Dict):
                 stop_event = threading.Event()
                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Returning"))
                 spinner_thread.start()
-                time.sleep(2)
+                time.sleep(1)
                 stop_event.set()
                 spinner_thread.join()
                 return
@@ -536,7 +536,7 @@ def check_cash_profiles(data: Dict):
                                 stop_event = threading.Event()
                                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Cash register launched"))
                                 spinner_thread.start()
-                                time.sleep(15)
+                                time.sleep(10)
                                 stop_event.set()
                                 spinner_thread.join()
                             except Exception as e:

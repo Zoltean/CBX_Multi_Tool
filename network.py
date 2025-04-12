@@ -179,7 +179,7 @@ def refresh_shift():
                 stop_event = threading.Event()
                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Shift refreshed"))
                 spinner_thread.start()
-                time.sleep(2)
+                time.sleep(1)
                 stop_event.set()
                 spinner_thread.join()
                 return True

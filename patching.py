@@ -46,7 +46,7 @@ def install_file(file_data: Dict, paylink_patch_data: Optional[Dict] = None, dat
         stop_event = threading.Event()
         spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Launching installer"))
         spinner_thread.start()
-        time.sleep(2)
+        time.sleep(1)
         stop_event.set()
         spinner_thread.join()
 
@@ -123,7 +123,7 @@ def install_file(file_data: Dict, paylink_patch_data: Optional[Dict] = None, dat
         stop_event = threading.Event()
         spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Install failed"))
         spinner_thread.start()
-        time.sleep(5)
+        time.sleep(2)
         stop_event.set()
         spinner_thread.join()
         return False
@@ -382,7 +382,7 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                                     stop_event = threading.Event()
                                     spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Restore completed"))
                                     spinner_thread.start()
-                                    time.sleep(2)
+                                    time.sleep(1)
                                     stop_event.set()
                                     spinner_thread.join()
                                 else:
@@ -434,7 +434,7 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                                 stop_event = threading.Event()
                                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Backup deleted"))
                                 spinner_thread.start()
-                                time.sleep(2)
+                                time.sleep(1)
                                 stop_event.set()
                                 spinner_thread.join()
                             else:
@@ -475,7 +475,7 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                         stop_event = threading.Event()
                         spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Returning"))
                         spinner_thread.start()
-                        time.sleep(2)
+                        time.sleep(1)
                         stop_event.set()
                         spinner_thread.join()
                         return False
@@ -708,7 +708,7 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                         stop_event = threading.Event()
                         spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Cash register launched"))
                         spinner_thread.start()
-                        time.sleep(5)
+                        time.sleep(10)
                         stop_event.set()
                         spinner_thread.join()
                     else:
@@ -768,7 +768,7 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
         stop_event = threading.Event()
         spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Patch completed"))
         spinner_thread.start()
-        time.sleep(2)
+        time.sleep(1)
         stop_event.set()
         spinner_thread.join()
         return True
