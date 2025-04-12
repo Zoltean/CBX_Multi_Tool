@@ -1,0 +1,73 @@
+153 INFO: PyInstaller: 6.12.0, contrib hooks: 2025.2
+153 INFO: Python: 3.10.11
+163 INFO: Platform: Windows-10-10.0.26100-SP0
+163 INFO: Python environment: E:\Soft\CBX_Multi_Tool\.venv
+164 INFO: wrote E:\Soft\CBX_Multi_Tool\main.spec
+166 INFO: Module search paths (PYTHONPATH):
+['E:\\Soft\\CBX_Multi_Tool\\.venv\\Scripts\\pyinstaller.exe',
+ 'C:\\Python310-x86\\python310.zip',
+ 'C:\\Python310-x86\\DLLs',
+ 'C:\\Python310-x86\\lib',
+ 'C:\\Python310-x86',
+ 'E:\\Soft\\CBX_Multi_Tool\\.venv',
+ 'E:\\Soft\\CBX_Multi_Tool\\.venv\\lib\\site-packages',
+ 'E:\\Soft\\CBX_Multi_Tool']
+418 INFO: Appending 'binaries' from .spec
+423 INFO: Appending 'datas' from .spec
+435 INFO: checking Analysis
+450 INFO: Building because E:\Soft\CBX_Multi_Tool\health_check.py changed
+450 INFO: Running Analysis Analysis-00.toc
+450 INFO: Target bytecode optimization level: 0
+451 INFO: Initializing module dependency graph...
+451 INFO: Initializing module graph hook caches...
+471 INFO: Analyzing modules for base_library.zip ...
+1126 INFO: Processing standard module hook 'hook-heapq.py' from 'E:\\Soft\\CBX_Multi_Tool\\.venv\\lib\\site-packages\\PyInstaller\\hooks'
+1203 INFO: Processing standard module hook 'hook-encodings.py' from 'E:\\Soft\\CBX_Multi_Tool\\.venv\\lib\\site-packages\\PyInstaller\\hooks'
+2552 INFO: Processing standard module hook 'hook-pickle.py' from 'E:\\Soft\\CBX_Multi_Tool\\.venv\\lib\\site-packages\\PyInstaller\\hooks'
+3754 INFO: Caching module dependency graph...
+3809 INFO: Looking for Python shared library...
+3816 INFO: Using Python shared library: C:\Python310-x86\python310.dll
+3816 INFO: Analyzing E:\Soft\CBX_Multi_Tool\main.py
+3843 INFO: Processing standard module hook 'hook-platform.py' from 'E:\\Soft\\CBX_Multi_Tool\\.venv\\lib\\site-packages\\PyInstaller\\hooks'
+4086 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'E:\\Soft\\CBX_Multi_Tool\\.venv\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+4087 INFO: SetuptoolsInfo: initializing cached setuptools info...
+5210 INFO: Processing standard module hook 'hook-charset_normalizer.py' from 'E:\\Soft\\CBX_Multi_Tool\\.venv\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+5323 INFO: Processing standard module hook 'hook-certifi.py' from 'E:\\Soft\\CBX_Multi_Tool\\.venv\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+5457 INFO: Processing standard module hook 'hook-psutil.py' from 'E:\\Soft\\CBX_Multi_Tool\\.venv\\lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+5604 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'E:\\Soft\\CBX_Multi_Tool\\.venv\\lib\\site-packages\\PyInstaller\\hooks'
+5670 INFO: Processing standard module hook 'hook-xml.py' from 'E:\\Soft\\CBX_Multi_Tool\\.venv\\lib\\site-packages\\PyInstaller\\hooks'
+5883 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from 'E:\\Soft\\CBX_Multi_Tool\\.venv\\lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+5991 INFO: Processing standard module hook 'hook-sqlite3.py' from 'E:\\Soft\\CBX_Multi_Tool\\.venv\\lib\\site-packages\\PyInstaller\\hooks'
+6400 INFO: Processing module hooks (post-graph stage)...
+6453 INFO: Performing binary vs. data reclassification (239 entries)
+6493 INFO: Looking for ctypes DLLs
+6502 INFO: Analyzing run-time hooks ...
+6504 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'E:\\Soft\\CBX_Multi_Tool\\.venv\\lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+6506 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'E:\\Soft\\CBX_Multi_Tool\\.venv\\lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+6508 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'E:\\Soft\\CBX_Multi_Tool\\.venv\\lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+6523 INFO: Creating base_library.zip...
+6609 INFO: Looking for dynamic libraries
+6852 INFO: Extra DLL search directories (AddDllDirectory): []
+6852 INFO: Extra DLL search directories (PATH): []
+7313 INFO: Warnings written to E:\Soft\CBX_Multi_Tool\build\main\warn-main.txt
+7363 INFO: Graph cross-reference written to E:\Soft\CBX_Multi_Tool\build\main\xref-main.html
+7392 INFO: checking PYZ
+7398 INFO: Building because E:\Soft\CBX_Multi_Tool\health_check.py changed
+7398 INFO: Building PYZ (ZlibArchive) E:\Soft\CBX_Multi_Tool\build\main\PYZ-00.pyz
+7880 INFO: Building PYZ (ZlibArchive) E:\Soft\CBX_Multi_Tool\build\main\PYZ-00.pyz completed successfully.
+7901 INFO: checking PKG
+7904 INFO: Building because E:\Soft\CBX_Multi_Tool\build\main\PYZ-00.pyz changed
+7904 INFO: Building PKG (CArchive) main.pkg
+9529 INFO: Building PKG (CArchive) main.pkg completed successfully.
+9537 INFO: Bootloader E:\Soft\CBX_Multi_Tool\.venv\lib\site-packages\PyInstaller\bootloader\Windows-32bit-intel\run.exe
+9537 INFO: checking EXE
+9540 INFO: Rebuilding EXE-00.toc because pkg is more recent
+9540 INFO: Building EXE from EXE-00.toc
+9542 INFO: Copying bootloader EXE to E:\Soft\CBX_Multi_Tool\dist\main.exe
+9571 INFO: Copying icon to EXE
+9572 INFO: Copying 0 resources to EXE
+9573 INFO: Embedding manifest in EXE
+9575 INFO: Appending PKG archive to EXE
+9590 INFO: Fixing EXE headers
+9665 INFO: Building EXE from EXE-00.toc completed successfully.
+9675 INFO: Build complete! The results are available in: E:\Soft\CBX_Multi_Tool\dist

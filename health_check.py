@@ -263,8 +263,6 @@ def check_cash_profiles(data: Dict, api_handler=None):
                 )
                 print(f"{i}. {Fore.CYAN}{profile['name']}{Style.RESET_ALL} {profile_str}")
             print()
-            print(f"Use 'R<number>' to refresh shift, 'C<number>' to update config, 'O<number>' to open folder, 'Q' to quit, or 0 to go back")
-            print(f"0. Back")
             print(f"{Fore.CYAN}{'=' * 40}{Style.RESET_ALL}")
 
             # Запрашиваем выбор пользователя
@@ -475,7 +473,7 @@ def check_cash_profiles(data: Dict, api_handler=None):
                                 stop_event = threading.Event()
                                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Processes resumed"))
                                 spinner_thread.start()
-                                time.sleep(1)
+                                time.sleep(2)
                                 stop_event.set()
                                 spinner_thread.join()
                             continue
@@ -539,7 +537,7 @@ def check_cash_profiles(data: Dict, api_handler=None):
                                 stop_event = threading.Event()
                                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Cash register launched"))
                                 spinner_thread.start()
-                                time.sleep(2)
+                                time.sleep(15)
                                 stop_event.set()
                                 spinner_thread.join()
                             except Exception as e:
