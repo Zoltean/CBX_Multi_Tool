@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
+import sys
+
 import requests
 from datetime import datetime
 import platform
@@ -51,6 +53,12 @@ def setup_logging():
         system_info.append(f"RAM: {total_ram:.2f} GB total")
     except Exception as e:
         system_info.append(f"Failed to gather system info: {str(e)}")
+
+    # Консольный обработчик с utf-8
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    console_handler.setStream(open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1))
+    logger.addHandler(console_handler)
 
     if LOG_TO_FILE:
         try:
