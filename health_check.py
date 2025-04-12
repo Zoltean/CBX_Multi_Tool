@@ -16,6 +16,7 @@ from colorama import Fore, Style
 
 from config import DRIVES
 from utils import show_spinner, find_process_by_path, find_all_processes_by_name
+from cleanup import cleanup  # Импортируем функцию cleanup
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ def find_external_cash_registers_by_processes() -> list:
 
 def find_external_cash_registers_by_filesystem() -> list:
     """
-    Ищет кассы по файловой системе с ограничением на глубину 1 от корня диска.
+    Ищет кассы по файловой системе с ограничением на глубину 2 от корня диска.
 
     Returns:
         list: Список словарей с информацией о кассах, найденных по файлам.
@@ -57,7 +58,7 @@ def find_external_cash_registers_by_filesystem() -> list:
 
     for drive in DRIVES:
         try:
-            # Ищем checkbox_kasa.exe только на глубине 1
+            # Ищем checkbox_kasa.exe на глубине 2
             pattern = os.path.join(drive, "*", "*", "checkbox_kasa.exe")
             for kasa_exe in glob.glob(pattern, recursive=False):
                 kasa_dir = os.path.normpath(os.path.dirname(kasa_exe)).lower()
@@ -262,12 +263,28 @@ def check_cash_profiles(data: Dict, api_handler=None):
                 )
                 print(f"{i}. {Fore.CYAN}{profile['name']}{Style.RESET_ALL} {profile_str}")
             print()
+            print(f"Use 'R<number>' to refresh shift, 'C<number>' to update config, 'O<number>' to open folder, 'Q' to quit, or 0 to go back")
+            print(f"0. Back")
             print(f"{Fore.CYAN}{'=' * 40}{Style.RESET_ALL}")
 
             # Запрашиваем выбор пользователя
-            choice = input("Use 'R<number>' to refresh shift, 'C<number>' to update config, 'O<number>' to open folder, or 0 to go back: ").strip()
+            choice = input("Select a profile, R<number>, C<number>, O<number>, Q to quit, or 0 to go back: ").strip()
             logger.info(f"User input in profile selection: {choice}")
 
+            # Проверяем команду Q (выход с очисткой)
+            if choice.lower() == "q":
+                logger.info("User chose to quit the application")
+                print(f"{Fore.GREEN}Initiating cleanup and exit...{Style.RESET_ALL}")
+                stop_event = threading.Event()
+                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Cleaning up"))
+                spinner_thread.start()
+                time.sleep(1)
+                stop_event.set()
+                spinner_thread.join()
+                cleanup(data, api_handler)
+                return
+
+            # Проверяем команду 0 (возврат в меню)
             if choice == "0":
                 logger.info("User chose to return from profile health check")
                 print(f"{Fore.GREEN}Returning to main menu...{Style.RESET_ALL}")
@@ -794,7 +811,7 @@ def check_cash_profiles(data: Dict, api_handler=None):
                     spinner_thread.join()
                     continue
                 else:
-                    logger.warning(f"Invalid profile choice: {choice_int}")
+                    logger.warning(f"Invalid profile choice: {choice}")
                     print(f"{Fore.RED}Invalid choice!{Style.RESET_ALL}")
                     stop_event = threading.Event()
                     spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid choice"))
