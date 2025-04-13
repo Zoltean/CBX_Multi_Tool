@@ -16,6 +16,47 @@ from utils import find_process_by_path, find_all_processes_by_name, manage_proce
 from network import download_file
 from backup_restore import create_backup, restore_from_backup, delete_backup
 
+
+def check_locked_dlls(target_dir: str, dll_names: List[str]) -> List[Dict]:
+    """
+    Проверяет, какие процессы используют указанные DLL в папке com-server или всей папке кассы.
+    Возвращает список словарей с информацией о процессах, блокирующих файлы.
+
+    Args:
+        target_dir (str): Путь к папке профиля кассы (например, 'C:\\checkbox.kasa.manager\\profiles\\4000363619').
+        dll_names (List[str]): Список имён DLL для проверки.
+
+    Returns:
+        List[Dict]: Список процессов, использующих DLL, с их PID, именем и путём к файлу.
+    """
+    locked_processes = []
+    com_server_dir = os.path.join(target_dir, "com-server")
+
+    # Проверяем файлы только в com-server или всей папке
+    search_dirs = [com_server_dir] if os.path.exists(com_server_dir) else [target_dir]
+
+    for search_dir in search_dirs:
+        for dll_name in dll_names:
+            dll_path = os.path.join(search_dir, dll_name)
+            if not os.path.exists(dll_path):
+                continue
+
+            for proc in psutil.process_iter(['pid', 'name', 'open_files']):
+                try:
+                    open_files = proc.info.get('open_files', [])
+                    for file in open_files:
+                        if file.path.lower() == dll_path.lower():
+                            locked_processes.append({
+                                'pid': proc.pid,
+                                'name': proc.name(),
+                                'file': dll_path
+                            })
+                            break
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+    return locked_processes
+
 def find_external_cash_registers_by_processes() -> list:
     """
     Finds cash registers by checking running processes for checkbox_kasa.exe.
@@ -448,11 +489,11 @@ def collect_profiles_info(manager_dir: str, is_rro_agent: bool) -> tuple[list, b
 
     return profiles_info, is_empty
 
+
 def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: bool = False,
                is_paylink: bool = False) -> bool:
     """
-    Applies a patch to the specified folder, handling cash registers, PayLink, or manager.
-    For cash registers, stays in profile selection menu after patching until '0' or 'Q'.
+    Применяет патч к указанной папке, проверяя блокировки DLL перед обновлением.
     """
     patch_file_name = patch_data["patch_name"]
     patch_url = patch_data["patch_url"]
@@ -511,7 +552,6 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
 
         if is_rro_agent:
             manager_dir = install_dir
-            # Initial collection of profiles
             stop_event = threading.Event()
             spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Searching cash registers"))
             spinner_thread.start()
@@ -577,13 +617,16 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                         if 0 <= backup_idx < len(backup_files):
                             backup_path = os.path.join(profiles_dir, backup_files[backup_idx])
                             target_dir = os.path.join(profiles_dir,
-                                                      os.path.splitext(backup_files[backup_idx])[0].split("_backup_")[0])
+                                                      os.path.splitext(backup_files[backup_idx])[0].split("_backup_")[
+                                                          0])
                             if os.path.exists(target_dir):
                                 if restore_from_backup(target_dir, backup_path, is_rro_agent=is_rro_agent,
                                                        is_paylink=is_paylink):
-                                    print(f"{Fore.GREEN}✓ Profile {os.path.basename(target_dir)} restored.{Style.RESET_ALL}")
+                                    print(
+                                        f"{Fore.GREEN}✓ Profile {os.path.basename(target_dir)} restored.{Style.RESET_ALL}")
                                     stop_event = threading.Event()
-                                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Restore completed"))
+                                    spinner_thread = threading.Thread(target=show_spinner,
+                                                                      args=(stop_event, "Restore completed"))
                                     spinner_thread.start()
                                     time.sleep(1)
                                     stop_event.set()
@@ -594,7 +637,8 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                             else:
                                 print(f"{Fore.RED}✗ Target directory not found for backup.{Style.RESET_ALL}")
                                 stop_event = threading.Event()
-                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Directory not found"))
+                                spinner_thread = threading.Thread(target=show_spinner,
+                                                                  args=(stop_event, "Directory not found"))
                                 spinner_thread.start()
                                 time.sleep(2)
                                 stop_event.set()
@@ -602,7 +646,8 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                         else:
                             print(f"{Fore.RED}✗ Invalid backup selection.{Style.RESET_ALL}")
                             stop_event = threading.Event()
-                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid selection"))
+                            spinner_thread = threading.Thread(target=show_spinner,
+                                                              args=(stop_event, "Invalid selection"))
                             spinner_thread.start()
                             time.sleep(2)
                             stop_event.set()
@@ -623,7 +668,6 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                         time.sleep(2)
                         stop_event.set()
                         spinner_thread.join()
-                    # Refresh profiles after restore
                     stop_event = threading.Event()
                     spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Refreshing profiles"))
                     spinner_thread.start()
@@ -640,7 +684,8 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                             if delete_backup(backup_path):
                                 print(f"{Fore.GREEN}✓ Backup deleted.{Style.RESET_ALL}")
                                 stop_event = threading.Event()
-                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Backup deleted"))
+                                spinner_thread = threading.Thread(target=show_spinner,
+                                                                  args=(stop_event, "Backup deleted"))
                                 spinner_thread.start()
                                 time.sleep(1)
                                 stop_event.set()
@@ -651,7 +696,8 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                         else:
                             print(f"{Fore.RED}✗ Invalid delete selection.{Style.RESET_ALL}")
                             stop_event = threading.Event()
-                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid selection"))
+                            spinner_thread = threading.Thread(target=show_spinner,
+                                                              args=(stop_event, "Invalid selection"))
                             spinner_thread.start()
                             time.sleep(2)
                             stop_event.set()
@@ -688,9 +734,11 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                     elif 1 <= choice_int <= len(profiles_info):
                         selected_profile = profiles_info[choice_int - 1]
                         if selected_profile["health"] == "BAD":
-                            print(f"{Fore.RED}✗ Cannot update {selected_profile['name']}: Database corrupted.{Style.RESET_ALL}")
+                            print(
+                                f"{Fore.RED}✗ Cannot update {selected_profile['name']}: Database corrupted.{Style.RESET_ALL}")
                             stop_event = threading.Event()
-                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update cancelled"))
+                            spinner_thread = threading.Thread(target=show_spinner,
+                                                              args=(stop_event, "Update cancelled"))
                             spinner_thread.start()
                             time.sleep(2)
                             stop_event.set()
@@ -700,9 +748,11 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                     elif choice_int == len(profiles_info) + 1:
                         for profile in profiles_info:
                             if profile["health"] == "BAD":
-                                print(f"{Fore.RED}✗ Cannot update all profiles: {profile['name']} database corrupted.{Style.RESET_ALL}")
+                                print(
+                                    f"{Fore.RED}✗ Cannot update all profiles: {profile['name']} database corrupted.{Style.RESET_ALL}")
                                 stop_event = threading.Event()
-                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update cancelled"))
+                                spinner_thread = threading.Thread(target=show_spinner,
+                                                                  args=(stop_event, "Update cancelled"))
                                 spinner_thread.start()
                                 time.sleep(2)
                                 stop_event.set()
@@ -727,6 +777,60 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                     stop_event.set()
                     spinner_thread.join()
                     continue
+
+                # Список DLL для проверки
+                dll_names = [
+                    "CheckBox.FiscalDriver.dll",
+                    "Artsoft.FiscalDriver.dll",
+                    "BAS.FiscalDriver.dll",
+                    "Newtonsoft.Json.dll",
+                    "RestSharp.dll",
+                    "Serilog.dll",
+                    "Serilog.Sinks.File.dll"
+                ]
+
+                # Проверка заблокированных DLL
+                locked_dlls = []
+                for target_dir in target_dirs:
+                    locked_processes = check_locked_dlls(target_dir, dll_names)
+                    if locked_processes:
+                        locked_dlls.extend(locked_processes)
+
+                if locked_dlls:
+                    print(f"{Fore.RED}⚠ Detected processes locking DLL files:{Style.RESET_ALL}")
+                    for proc in locked_dlls:
+                        print(f" - PID: {proc['pid']} | Name: {proc['name']} | File: {proc['file']}")
+                    choice = input(f"{Fore.CYAN}Close these processes? (Y/N): {Style.RESET_ALL}").strip().lower()
+                    if choice == "y":
+                        print(f"{Fore.YELLOW}Stopping processes locking DLLs...{Style.RESET_ALL}")
+                        for proc in locked_dlls:
+                            try:
+                                p = psutil.Process(proc['pid'])
+                                p.kill()
+                                print(f"{Fore.GREEN}✓ Stopped {proc['name']} (PID: {proc['pid']}).{Style.RESET_ALL}")
+                                stop_event = threading.Event()
+                                spinner_thread = threading.Thread(target=show_spinner,
+                                                                  args=(stop_event, "Process stopped"))
+                                spinner_thread.start()
+                                time.sleep(1)
+                                stop_event.set()
+                                spinner_thread.join()
+                            except psutil.NoSuchProcess:
+                                print(
+                                    f"{Fore.YELLOW}⚠ Process {proc['name']} (PID: {proc['pid']}) already terminated.{Style.RESET_ALL}")
+                            except Exception as e:
+                                print(
+                                    f"{Fore.RED}✗ Failed to stop {proc['name']} (PID: {proc['pid']}): {e}{Style.RESET_ALL}")
+                        time.sleep(1)
+                    else:
+                        print(f"{Fore.RED}✗ Update cancelled due to locked DLLs.{Style.RESET_ALL}")
+                        stop_event = threading.Event()
+                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update cancelled"))
+                        spinner_thread.start()
+                        time.sleep(2)
+                        stop_event.set()
+                        spinner_thread.join()
+                        return False
 
                 # Handle backups
                 for target_dir in target_dirs:
@@ -760,7 +864,8 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                     print(f"{Fore.RED}⚠ Cash register process is running!{Style.RESET_ALL}")
                     for proc in cash_processes:
                         print(f" - PID: {proc.pid}")
-                    choice = input(f"{Fore.CYAN}Close cash register processes? (Y/N): {Style.RESET_ALL}").strip().lower()
+                    choice = input(
+                        f"{Fore.CYAN}Close cash register processes? (Y/N): {Style.RESET_ALL}").strip().lower()
                     if choice == "y":
                         print(f"{Fore.YELLOW}Stopping cash register processes...{Style.RESET_ALL}")
                         for proc in cash_processes:
@@ -768,7 +873,8 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                                 proc.kill()
                                 print(f"{Fore.GREEN}✓ Stopped checkbox_kasa.exe (PID: {proc.pid}).{Style.RESET_ALL}")
                                 stop_event = threading.Event()
-                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process stopped"))
+                                spinner_thread = threading.Thread(target=show_spinner,
+                                                                  args=(stop_event, "Process stopped"))
                                 spinner_thread.start()
                                 time.sleep(1)
                                 stop_event.set()
@@ -776,7 +882,8 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                             except psutil.NoSuchProcess:
                                 pass
                             except Exception:
-                                print(f"{Fore.RED}✗ Failed to stop checkbox_kasa.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                                print(
+                                    f"{Fore.RED}✗ Failed to stop checkbox_kasa.exe (PID: {proc.pid}).{Style.RESET_ALL}")
                         time.sleep(1)
                     else:
                         print(f"{Fore.RED}✗ Update cancelled.{Style.RESET_ALL}")
@@ -795,7 +902,8 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                                 proc.suspend()
                                 print(f"{Fore.GREEN}✓ Paused kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
                                 stop_event = threading.Event()
-                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process paused"))
+                                spinner_thread = threading.Thread(target=show_spinner,
+                                                                  args=(stop_event, "Process paused"))
                                 spinner_thread.start()
                                 time.sleep(1)
                                 stop_event.set()
@@ -803,7 +911,8 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                             except psutil.NoSuchProcess:
                                 pass
                             except Exception:
-                                print(f"{Fore.RED}✗ Failed to pause kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                                print(
+                                    f"{Fore.RED}✗ Failed to pause kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
                 elif manager_running:
                     print(f"{Fore.YELLOW}Cash register not running, manager running - proceeding...{Style.RESET_ALL}")
                 else:
@@ -814,7 +923,8 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                 monitor_threads = []
                 processes_to_kill = ["checkbox_kasa.exe"]
                 for target_dir in target_dirs:
-                    thread = threading.Thread(target=manage_processes, args=(processes_to_kill, [target_dir], stop_monitoring))
+                    thread = threading.Thread(target=manage_processes,
+                                              args=(processes_to_kill, [target_dir], stop_monitoring))
                     thread.start()
                     monitor_threads.append(thread)
                 print(f"{Fore.CYAN}🔒 Monitoring processes during update...{Style.RESET_ALL}")
@@ -841,7 +951,8 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                                 os.remove(need_reboot_file)
                     print(f"{Fore.GREEN}✓ Files updated successfully in {', '.join(target_dirs)}!{Style.RESET_ALL}")
                 except PermissionError:
-                    print(f"{Fore.RED}✗ Permission denied. Please close applications or run as administrator.{Style.RESET_ALL}")
+                    print(
+                        f"{Fore.RED}✗ Permission denied. Please close applications or run as administrator.{Style.RESET_ALL}")
                     stop_event = threading.Event()
                     spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Permission error"))
                     spinner_thread.start()
@@ -886,7 +997,8 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                             subprocess.Popen(cmd, cwd=target_dir, shell=True)
                             print(f"{Fore.GREEN}✓ Cash register launched successfully!{Style.RESET_ALL}")
                             stop_event = threading.Event()
-                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Cash register launched"))
+                            spinner_thread = threading.Thread(target=show_spinner,
+                                                              args=(stop_event, "Cash register launched"))
                             spinner_thread.start()
                             time.sleep(10)
                             stop_event.set()
@@ -910,7 +1022,8 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                             stop_event.set()
                             spinner_thread.join()
                         except psutil.NoSuchProcess:
-                            print(f"{Fore.YELLOW}⚠ kasa_manager.exe (PID: {proc.pid}) already terminated.{Style.RESET_ALL}")
+                            print(
+                                f"{Fore.YELLOW}⚠ kasa_manager.exe (PID: {proc.pid}) already terminated.{Style.RESET_ALL}")
                         except Exception as e:
                             print(f"{Fore.RED}✗ Failed to resume kasa_manager.exe: {e}{Style.RESET_ALL}")
 
@@ -934,6 +1047,58 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
         else:
             target_dirs = [install_dir]
             processes_to_kill = ["CheckboxPayLink.exe", "POSServer.exe"] if is_paylink else ["kasa_manager.exe"]
+
+            # Проверка заблокированных DLL
+            dll_names = [
+                "CheckBox.FiscalDriver.dll",
+                "Artsoft.FiscalDriver.dll",
+                "BAS.FiscalDriver.dll",
+                "Newtonsoft.Json.dll",
+                "RestSharp.dll",
+                "Serilog.dll",
+                "Serilog.Sinks.File.dll"
+            ]
+            locked_dlls = []
+            for target_dir in target_dirs:
+                locked_processes = check_locked_dlls(target_dir, dll_names)
+                if locked_processes:
+                    locked_dlls.extend(locked_processes)
+
+            if locked_dlls:
+                print(f"{Fore.RED}⚠ Detected processes locking DLL files:{Style.RESET_ALL}")
+                for proc in locked_dlls:
+                    print(f" - PID: {proc['pid']} | Name: {proc['name']} | File: {proc['file']}")
+                choice = input(f"{Fore.CYAN}Close these processes? (Y/N): {Style.RESET_ALL}").strip().lower()
+                if choice == "y":
+                    print(f"{Fore.YELLOW}Stopping processes locking DLLs...{Style.RESET_ALL}")
+                    for proc in locked_dlls:
+                        try:
+                            p = psutil.Process(proc['pid'])
+                            p.kill()
+                            print(f"{Fore.GREEN}✓ Stopped {proc['name']} (PID: {proc['pid']}).{Style.RESET_ALL}")
+                            stop_event = threading.Event()
+                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process stopped"))
+                            spinner_thread.start()
+                            time.sleep(1)
+                            stop_event.set()
+                            spinner_thread.join()
+                        except psutil.NoSuchProcess:
+                            print(
+                                f"{Fore.YELLOW}⚠ Process {proc['name']} (PID: {proc['pid']}) already terminated.{Style.RESET_ALL}")
+                        except Exception as e:
+                            print(
+                                f"{Fore.RED}✗ Failed to stop {proc['name']} (PID: {proc['pid']}): {e}{Style.RESET_ALL}")
+                    time.sleep(1)
+                else:
+                    print(f"{Fore.RED}✗ Update cancelled due to locked DLLs.{Style.RESET_ALL}")
+                    stop_event = threading.Event()
+                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update cancelled"))
+                    spinner_thread.start()
+                    time.sleep(2)
+                    stop_event.set()
+                    spinner_thread.join()
+                    return False
+
             if not manage_processes(processes_to_kill, target_dirs):
                 return False
 
@@ -942,7 +1107,8 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
             monitor_threads = []
             processes_to_kill = ["CheckboxPayLink.exe", "POSServer.exe"] if is_paylink else ["kasa_manager.exe"]
             for target_dir in target_dirs:
-                thread = threading.Thread(target=manage_processes, args=(processes_to_kill, [target_dir], stop_monitoring))
+                thread = threading.Thread(target=manage_processes,
+                                          args=(processes_to_kill, [target_dir], stop_monitoring))
                 thread.start()
                 monitor_threads.append(thread)
             print(f"{Fore.CYAN}🔒 Monitoring processes during update...{Style.RESET_ALL}")
@@ -965,7 +1131,8 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                         os.remove(need_reboot_file)
                 print(f"{Fore.GREEN}✓ Files updated successfully in {target_dirs[0]}!{Style.RESET_ALL}")
             except PermissionError:
-                print(f"{Fore.RED}✗ Permission denied. Please close applications or run as administrator.{Style.RESET_ALL}")
+                print(
+                    f"{Fore.RED}✗ Permission denied. Please close applications or run as administrator.{Style.RESET_ALL}")
                 stop_event = threading.Event()
                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Permission error"))
                 spinner_thread.start()
