@@ -18,19 +18,34 @@ def cleanup(data: Dict):
 
     try:
         for category in ["legacy", "dev", "tools"]:
-            if category in data:
-                for key, item in data[category].items():
-                    if isinstance(item, list):
-                        for sub_item in item:
+            if category not in data:
+                continue
+            category_data = data[category]
+            if not isinstance(category_data, dict):
+                print(f"{Fore.YELLOW}⚠ Skipping invalid category data for {category}: not a dictionary{Style.RESET_ALL}")
+                continue
+
+            for key, item in category_data.items():
+                if isinstance(item, list):
+                    for sub_item in item:
+                        if isinstance(sub_item, dict):
                             files_to_delete.extend([sub_item.get("name", ""), sub_item.get("patch_name", "")])
-                    elif isinstance(item, dict):
-                        for sub_key, sub_item in item.items():
-                            if isinstance(sub_item, list):
-                                for sub_sub_item in sub_item:
-                                    files_to_delete.extend(
-                                        [sub_sub_item.get("name", ""), sub_sub_item.get("patch_name", "")])
-                            else:
-                                files_to_delete.extend([sub_item.get("name", ""), sub_item.get("patch_name", "")])
+                        else:
+                            print(f"{Fore.YELLOW}⚠ Skipping invalid sub-item in {category}/{key}: not a dictionary{Style.RESET_ALL}")
+                elif isinstance(item, dict):
+                    for sub_key, sub_item in item.items():
+                        if isinstance(sub_item, list):
+                            for sub_sub_item in sub_item:
+                                if isinstance(sub_sub_item, dict):
+                                    files_to_delete.extend([sub_sub_item.get("name", ""), sub_sub_item.get("patch_name", "")])
+                                else:
+                                    print(f"{Fore.YELLOW}⚠ Skipping invalid sub-sub-item in {category}/{key}/{sub_key}: not a dictionary{Style.RESET_ALL}")
+                        elif isinstance(sub_item, dict):
+                            files_to_delete.extend([sub_item.get("name", ""), sub_item.get("patch_name", "")])
+                        else:
+                            print(f"{Fore.YELLOW}⚠ Skipping invalid sub-item in {category}/{key}/{sub_key}: not a dictionary{Style.RESET_ALL}")
+                else:
+                    print(f"{Fore.YELLOW}⚠ Skipping invalid item in {category}/{key}: not a dictionary or list{Style.RESET_ALL}")
 
         files_to_delete = [f for f in files_to_delete if f and isinstance(f, str)]
 

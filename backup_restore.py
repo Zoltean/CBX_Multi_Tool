@@ -33,8 +33,11 @@ def create_backup(target_dir: str) -> Optional[str]:
         print(f"{Fore.GREEN}✓ Backup created: {backup_name}{Style.RESET_ALL}")
         stop_event = threading.Event()
         spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Backup created"))
-        spinner_thread.start()
-        time.sleep(1)
+        try:
+            spinner_thread.start()
+            time.sleep(1)
+        except Exception as e:
+            print(f"{Fore.YELLOW}⚠ Spinner thread failed: {e}{Style.RESET_ALL}")
         stop_event.set()
         spinner_thread.join()
         return backup_path
@@ -42,8 +45,11 @@ def create_backup(target_dir: str) -> Optional[str]:
         print(f"{Fore.RED}✗ Failed to create backup: {e}{Style.RESET_ALL}")
         stop_event = threading.Event()
         spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Backup failed"))
-        spinner_thread.start()
-        time.sleep(2)
+        try:
+            spinner_thread.start()
+            time.sleep(2)
+        except Exception as e:
+            print(f"{Fore.YELLOW}⚠ Spinner thread failed: {e}{Style.RESET_ALL}")
         stop_event.set()
         spinner_thread.join()
         return None
@@ -55,8 +61,11 @@ def delete_backup(backup_path: str) -> bool:
         print(f"{Fore.GREEN}✓ Backup deleted successfully!{Style.RESET_ALL}")
         stop_event = threading.Event()
         spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Backup deleted"))
-        spinner_thread.start()
-        time.sleep(1)
+        try:
+            spinner_thread.start()
+            time.sleep(1)
+        except Exception as e:
+            print(f"{Fore.YELLOW}⚠ Spinner thread failed: {e}{Style.RESET_ALL}")
         stop_event.set()
         spinner_thread.join()
         return True
@@ -64,8 +73,11 @@ def delete_backup(backup_path: str) -> bool:
         print(f"{Fore.RED}✗ Failed to delete backup: {e}{Style.RESET_ALL}")
         stop_event = threading.Event()
         spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Delete failed"))
-        spinner_thread.start()
-        time.sleep(2)
+        try:
+            spinner_thread.start()
+            time.sleep(2)
+        except Exception as e:
+            print(f"{Fore.YELLOW}⚠ Spinner thread failed: {e}{Style.RESET_ALL}")
         stop_event.set()
         spinner_thread.join()
         return False
@@ -126,8 +138,11 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
             print(f"{Fore.RED}✗ Restoration cancelled.{Style.RESET_ALL}")
             stop_event = threading.Event()
             spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Restore cancelled"))
-            spinner_thread.start()
-            time.sleep(2)
+            try:
+                spinner_thread.start()
+                time.sleep(2)
+            except Exception as e:
+                print(f"{Fore.YELLOW}⚠ Spinner thread failed: {e}{Style.RESET_ALL}")
             stop_event.set()
             spinner_thread.join()
             return False
@@ -149,8 +164,11 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
         print(f"{Fore.RED}✗ Failed to clear directory: {e}{Style.RESET_ALL}")
         stop_event = threading.Event()
         spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Clear failed"))
-        spinner_thread.start()
-        time.sleep(2)
+        try:
+            spinner_thread.start()
+            time.sleep(2)
+        except Exception as e:
+            print(f"{Fore.YELLOW}⚠ Spinner thread failed: {e}{Style.RESET_ALL}")
         stop_event.set()
         spinner_thread.join()
         return False
@@ -168,8 +186,11 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
         print(f"{Fore.RED}✗ Restore failed: {e}{Style.RESET_ALL}")
         stop_event = threading.Event()
         spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Restore failed"))
-        spinner_thread.start()
-        time.sleep(2)
+        try:
+            spinner_thread.start()
+            time.sleep(2)
+        except Exception as e:
+            print(f"{Fore.YELLOW}⚠ Spinner thread failed: {e}{Style.RESET_ALL}")
         stop_event.set()
         spinner_thread.join()
         return False
@@ -184,8 +205,11 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
                 print(f"{Fore.GREEN}✓ Cash register launched successfully!{Style.RESET_ALL}")
                 stop_event = threading.Event()
                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Cash register launched"))
-                spinner_thread.start()
-                time.sleep(10)
+                try:
+                    spinner_thread.start()
+                    time.sleep(10)
+                except Exception as e:
+                    print(f"{Fore.YELLOW}⚠ Spinner thread failed: {e}{Style.RESET_ALL}")
                 stop_event.set()
                 spinner_thread.join()
             else:
@@ -217,8 +241,11 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
                 print(f"{Fore.GREEN}✓ Resumed kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
                 stop_event = threading.Event()
                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process resumed"))
-                spinner_thread.start()
-                time.sleep(1)
+                try:
+                    spinner_thread.start()
+                    time.sleep(1)
+                except Exception as e:
+                    print(f"{Fore.YELLOW}⚠ Spinner thread failed: {e}{Style.RESET_ALL}")
                 stop_event.set()
                 spinner_thread.join()
             except psutil.NoSuchProcess:
@@ -228,8 +255,11 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
 
     stop_event = threading.Event()
     spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Restore completed"))
-    spinner_thread.start()
-    time.sleep(2)
+    try:
+        spinner_thread.start()
+        time.sleep(2)
+    except Exception as e:
+        print(f"{Fore.YELLOW}⚠ Spinner thread failed: {e}{Style.RESET_ALL}")
     stop_event.set()
     spinner_thread.join()
     return True
