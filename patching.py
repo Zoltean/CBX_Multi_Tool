@@ -202,8 +202,258 @@ def extract_to_multiple_dirs(zip_ref: zipfile.ZipFile, target_dirs: List[str], t
         print(f"{Fore.RED}✗ Extraction error: {e}{Style.RESET_ALL}")
         raise
 
+def collect_profiles_info(manager_dir: str, is_rro_agent: bool) -> tuple[list, bool]:
+    """
+    Collects information about cash register profiles from profiles.json, filesystem, and processes.
+    Returns a tuple of profiles_info list and a boolean indicating if profiles.json is empty.
+    """
+    profiles_info = []
+    is_empty = False
+
+    if is_rro_agent and manager_dir:
+        # Check profiles.json
+        cash_registers, is_empty, seen_paths = find_cash_registers_by_profiles_json(manager_dir)
+        if is_empty:
+            print(f"{Fore.RED}! ! ! PROFILES.JSON ARE EMPTY ! ! !{Style.RESET_ALL}")
+
+        # Add cash registers from profiles.json (non-external)
+        for cash in cash_registers:
+            db_path = os.path.join(cash["path"], "agent.db")
+            version = "Unknown"
+            fiscal_number = "Unknown"
+            health = "BAD"
+            trans_status = "ERROR"
+            shift_status = "OPENED"
+            is_running = bool(find_process_by_path("checkbox_kasa.exe", cash["path"]))
+
+            try:
+                version_path = os.path.join(cash["path"], "version")
+                if os.path.exists(version_path):
+                    with open(version_path, "r", encoding="utf-8") as f:
+                        version = f.read().strip()
+            except Exception:
+                pass
+
+            if os.path.exists(db_path):
+                try:
+                    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT fiscal_number FROM cash_register LIMIT 1;")
+                    result = cursor.fetchone()
+                    if result and result[0]:
+                        fiscal_number = result[0]
+                    conn.close()
+                except Exception:
+                    pass
+
+                for attempt in range(3):
+                    try:
+                        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
+                        cursor = conn.cursor()
+
+                        cursor.execute("PRAGMA integrity_check;")
+                        result = cursor.fetchone()[0]
+                        if result == "ok":
+                            health = "OK"
+                            cursor.execute("SELECT status FROM transactions;")
+                            statuses = [row[0] for row in cursor.fetchall()]
+                            if not statuses:
+                                trans_status = "EMPTY"
+                            elif any(s == "ERROR" for s in statuses):
+                                trans_status = "ERROR"
+                            elif any(s == "PENDING" for s in statuses):
+                                trans_status = "PENDING"
+                            else:
+                                trans_status = "DONE"
+
+                            cursor.execute("SELECT status FROM shifts WHERE id = (SELECT MAX(id) FROM shifts);")
+                            shift_result = cursor.fetchone()
+                            if shift_result:
+                                shift_status = shift_result[0].upper()
+                            else:
+                                shift_status = "CLOSED"
+                        break
+                    except Exception:
+                        time.sleep(1)
+                    finally:
+                        if 'conn' in locals():
+                            conn.close()
+                            time.sleep(0.1)
+
+            profiles_info.append({
+                "name": os.path.basename(cash["path"]),
+                "path": cash["path"],
+                "health": health,
+                "trans_status": trans_status,
+                "shift_status": shift_status,
+                "version": version,
+                "fiscal_number": fiscal_number,
+                "is_running": is_running,
+                "is_external": False
+            })
+
+        # Perform filesystem search to find additional cash registers
+        external_cashes = find_external_cash_registers_by_filesystem(manager_dir, seen_paths)
+        for cash in external_cashes:
+            db_path = os.path.join(cash["path"], "agent.db")
+            version = "Unknown"
+            fiscal_number = "Unknown"
+            health = "BAD"
+            trans_status = "ERROR"
+            shift_status = "OPENED"
+            is_running = bool(find_process_by_path("checkbox_kasa.exe", cash["path"]))
+
+            try:
+                version_path = os.path.join(cash["path"], "version")
+                if os.path.exists(version_path):
+                    with open(version_path, "r", encoding="utf-8") as f:
+                        version = f.read().strip()
+            except Exception:
+                pass
+
+            if os.path.exists(db_path):
+                try:
+                    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT fiscal_number FROM cash_register LIMIT 1;")
+                    result = cursor.fetchone()
+                    if result and result[0]:
+                        fiscal_number = result[0]
+                    conn.close()
+                except Exception:
+                    pass
+
+                for attempt in range(3):
+                    try:
+                        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
+                        cursor = conn.cursor()
+
+                        cursor.execute("PRAGMA integrity_check;")
+                        result = cursor.fetchone()[0]
+                        if result == "ok":
+                            health = "OK"
+                            cursor.execute("SELECT status FROM transactions;")
+                            statuses = [row[0] for row in cursor.fetchall()]
+                            if not statuses:
+                                trans_status = "EMPTY"
+                            elif any(s == "ERROR" for s in statuses):
+                                trans_status = "ERROR"
+                            elif any(s == "PENDING" for s in statuses):
+                                trans_status = "PENDING"
+                            else:
+                                trans_status = "DONE"
+
+                            cursor.execute("SELECT status FROM shifts WHERE id = (SELECT MAX(id) FROM shifts);")
+                            shift_result = cursor.fetchone()
+                            if shift_result:
+                                shift_status = shift_result[0].upper()
+                            else:
+                                shift_status = "CLOSED"
+                        break
+                    except Exception:
+                        time.sleep(1)
+                    finally:
+                        if 'conn' in locals():
+                            conn.close()
+                            time.sleep(0.1)
+
+            profiles_info.append({
+                "name": f"[Ext] {os.path.basename(cash['path'])}",
+                "path": cash["path"],
+                "health": health,
+                "trans_status": trans_status,
+                "shift_status": shift_status,
+                "version": version,
+                "fiscal_number": fiscal_number,
+                "is_running": is_running,
+                "is_external": True
+            })
+    else:
+        # If no manager directory, search for running processes
+        external_cashes = find_external_cash_registers_by_processes()
+        for cash in external_cashes:
+            db_path = os.path.join(cash["path"], "agent.db")
+            version = "Unknown"
+            fiscal_number = "Unknown"
+            health = "BAD"
+            trans_status = "ERROR"
+            shift_status = "OPENED"
+            is_running = bool(find_process_by_path("checkbox_kasa.exe", cash["path"]))
+
+            try:
+                version_path = os.path.join(cash["path"], "version")
+                if os.path.exists(version_path):
+                    with open(version_path, "r", encoding="utf-8") as f:
+                        version = f.read().strip()
+            except Exception:
+                pass
+
+            if os.path.exists(db_path):
+                try:
+                    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT fiscal_number FROM cash_register LIMIT 1;")
+                    result = cursor.fetchone()
+                    if result and result[0]:
+                        fiscal_number = result[0]
+                    conn.close()
+                except Exception:
+                    pass
+
+                for attempt in range(3):
+                    try:
+                        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
+                        cursor = conn.cursor()
+
+                        cursor.execute("PRAGMA integrity_check;")
+                        result = cursor.fetchone()[0]
+                        if result == "ok":
+                            health = "OK"
+                            cursor.execute("SELECT status FROM transactions;")
+                            statuses = [row[0] for row in cursor.fetchall()]
+                            if not statuses:
+                                trans_status = "EMPTY"
+                            elif any(s == "ERROR" for s in statuses):
+                                trans_status = "ERROR"
+                            elif any(s == "PENDING" for s in statuses):
+                                trans_status = "PENDING"
+                            else:
+                                trans_status = "DONE"
+
+                            cursor.execute("SELECT status FROM shifts WHERE id = (SELECT MAX(id) FROM shifts);")
+                            shift_result = cursor.fetchone()
+                            if shift_result:
+                                shift_status = shift_result[0].upper()
+                            else:
+                                shift_status = "CLOSED"
+                        break
+                    except Exception:
+                        time.sleep(1)
+                    finally:
+                        if 'conn' in locals():
+                            conn.close()
+                            time.sleep(0.1)
+
+            profiles_info.append({
+                "name": f"[Ext] {os.path.basename(cash['path'])}",
+                "path": cash["path"],
+                "health": health,
+                "trans_status": trans_status,
+                "shift_status": shift_status,
+                "version": version,
+                "fiscal_number": fiscal_number,
+                "is_running": is_running,
+                "is_external": True
+            })
+
+    return profiles_info, is_empty
+
 def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: bool = False,
                is_paylink: bool = False) -> bool:
+    """
+    Applies a patch to the specified folder, handling cash registers, PayLink, or manager.
+    For cash registers, stays in profile selection menu after patching until '0' or 'Q'.
+    """
     patch_file_name = patch_data["patch_name"]
     patch_url = patch_data["patch_url"]
     print(f"{Fore.CYAN}📥 Preparing to apply {patch_file_name}...{Style.RESET_ALL}")
@@ -260,250 +510,12 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
         print(f"{Fore.GREEN}✓ Found installation directory: {install_dir}{Style.RESET_ALL}")
 
         if is_rro_agent:
-            # Search for cash registers
-            profiles_info = []
             manager_dir = install_dir
-
+            # Initial collection of profiles
             stop_event = threading.Event()
             spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Searching cash registers"))
             spinner_thread.start()
-
-            if manager_dir:
-                # Check profiles.json
-                cash_registers, is_empty, seen_paths = find_cash_registers_by_profiles_json(manager_dir)
-                if is_empty:
-                    print(f"{Fore.RED}! ! ! PROFILES.JSON ARE EMPTY ! ! !{Style.RESET_ALL}")
-
-                # Add cash registers from profiles.json (non-external)
-                for cash in cash_registers:
-                    db_path = os.path.join(cash["path"], "agent.db")
-                    version = "Unknown"
-                    fiscal_number = "Unknown"
-                    health = "BAD"
-                    trans_status = "ERROR"
-                    shift_status = "OPENED"
-                    is_running = bool(find_process_by_path("checkbox_kasa.exe", cash["path"]))
-
-                    try:
-                        version_path = os.path.join(cash["path"], "version")
-                        if os.path.exists(version_path):
-                            with open(version_path, "r", encoding="utf-8") as f:
-                                version = f.read().strip()
-                    except Exception:
-                        pass
-
-                    if os.path.exists(db_path):
-                        try:
-                            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
-                            cursor = conn.cursor()
-                            cursor.execute("SELECT fiscal_number FROM cash_register LIMIT 1;")
-                            result = cursor.fetchone()
-                            if result and result[0]:
-                                fiscal_number = result[0]
-                            conn.close()
-                        except Exception:
-                            pass
-
-                        for attempt in range(3):
-                            try:
-                                conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
-                                cursor = conn.cursor()
-
-                                cursor.execute("PRAGMA integrity_check;")
-                                result = cursor.fetchone()[0]
-                                if result == "ok":
-                                    health = "OK"
-                                    cursor.execute("SELECT status FROM transactions;")
-                                    statuses = [row[0] for row in cursor.fetchall()]
-                                    if not statuses:
-                                        trans_status = "EMPTY"
-                                    elif any(s == "ERROR" for s in statuses):
-                                        trans_status = "ERROR"
-                                    elif any(s == "PENDING" for s in statuses):
-                                        trans_status = "PENDING"
-                                    else:
-                                        trans_status = "DONE"
-
-                                    cursor.execute("SELECT status FROM shifts WHERE id = (SELECT MAX(id) FROM shifts);")
-                                    shift_result = cursor.fetchone()
-                                    if shift_result:
-                                        shift_status = shift_result[0].upper()
-                                    else:
-                                        shift_status = "CLOSED"
-                                break
-                            except Exception:
-                                time.sleep(1)
-                            finally:
-                                if 'conn' in locals():
-                                    conn.close()
-                                    time.sleep(0.1)
-
-                    profiles_info.append({
-                        "name": os.path.basename(cash["path"]),
-                        "path": cash["path"],
-                        "health": health,
-                        "trans_status": trans_status,
-                        "shift_status": shift_status,
-                        "version": version,
-                        "fiscal_number": fiscal_number,
-                        "is_running": is_running,
-                        "is_external": False
-                    })
-
-                # Perform filesystem search to find additional cash registers
-                external_cashes = find_external_cash_registers_by_filesystem(manager_dir, seen_paths)
-                for cash in external_cashes:
-                    db_path = os.path.join(cash["path"], "agent.db")
-                    version = "Unknown"
-                    fiscal_number = "Unknown"
-                    health = "BAD"
-                    trans_status = "ERROR"
-                    shift_status = "OPENED"
-                    is_running = bool(find_process_by_path("checkbox_kasa.exe", cash["path"]))
-
-                    try:
-                        version_path = os.path.join(cash["path"], "version")
-                        if os.path.exists(version_path):
-                            with open(version_path, "r", encoding="utf-8") as f:
-                                version = f.read().strip()
-                    except Exception:
-                        pass
-
-                    if os.path.exists(db_path):
-                        try:
-                            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
-                            cursor = conn.cursor()
-                            cursor.execute("SELECT fiscal_number FROM cash_register LIMIT 1;")
-                            result = cursor.fetchone()
-                            if result and result[0]:
-                                fiscal_number = result[0]
-                            conn.close()
-                        except Exception:
-                            pass
-
-                        for attempt in range(3):
-                            try:
-                                conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
-                                cursor = conn.cursor()
-
-                                cursor.execute("PRAGMA integrity_check;")
-                                result = cursor.fetchone()[0]
-                                if result == "ok":
-                                    health = "OK"
-                                    cursor.execute("SELECT status FROM transactions;")
-                                    statuses = [row[0] for row in cursor.fetchall()]
-                                    if not statuses:
-                                        trans_status = "EMPTY"
-                                    elif any(s == "ERROR" for s in statuses):
-                                        trans_status = "ERROR"
-                                    elif any(s == "PENDING" for s in statuses):
-                                        trans_status = "PENDING"
-                                    else:
-                                        trans_status = "DONE"
-
-                                    cursor.execute("SELECT status FROM shifts WHERE id = (SELECT MAX(id) FROM shifts);")
-                                    shift_result = cursor.fetchone()
-                                    if shift_result:
-                                        shift_status = shift_result[0].upper()
-                                    else:
-                                        shift_status = "CLOSED"
-                                break
-                            except Exception:
-                                time.sleep(1)
-                            finally:
-                                if 'conn' in locals():
-                                    conn.close()
-                                    time.sleep(0.1)
-
-                    profiles_info.append({
-                        "name": f"[External] {os.path.basename(cash['path'])}",
-                        "path": cash["path"],
-                        "health": health,
-                        "trans_status": trans_status,
-                        "shift_status": shift_status,
-                        "version": version,
-                        "fiscal_number": fiscal_number,
-                        "is_running": is_running,
-                        "is_external": True
-                    })
-            else:
-                # If no manager directory, search for running processes
-                external_cashes = find_external_cash_registers_by_processes()
-                for cash in external_cashes:
-                    db_path = os.path.join(cash["path"], "agent.db")
-                    version = "Unknown"
-                    fiscal_number = "Unknown"
-                    health = "BAD"
-                    trans_status = "ERROR"
-                    shift_status = "OPENED"
-                    is_running = bool(find_process_by_path("checkbox_kasa.exe", cash["path"]))
-
-                    try:
-                        version_path = os.path.join(cash["path"], "version")
-                        if os.path.exists(version_path):
-                            with open(version_path, "r", encoding="utf-8") as f:
-                                version = f.read().strip()
-                    except Exception:
-                        pass
-
-                    if os.path.exists(db_path):
-                        try:
-                            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
-                            cursor = conn.cursor()
-                            cursor.execute("SELECT fiscal_number FROM cash_register LIMIT 1;")
-                            result = cursor.fetchone()
-                            if result and result[0]:
-                                fiscal_number = result[0]
-                            conn.close()
-                        except Exception:
-                            pass
-
-                        for attempt in range(3):
-                            try:
-                                conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
-                                cursor = conn.cursor()
-
-                                cursor.execute("PRAGMA integrity_check;")
-                                result = cursor.fetchone()[0]
-                                if result == "ok":
-                                    health = "OK"
-                                    cursor.execute("SELECT status FROM transactions;")
-                                    statuses = [row[0] for row in cursor.fetchall()]
-                                    if not statuses:
-                                        trans_status = "EMPTY"
-                                    elif any(s == "ERROR" for s in statuses):
-                                        trans_status = "ERROR"
-                                    elif any(s == "PENDING" for s in statuses):
-                                        trans_status = "PENDING"
-                                    else:
-                                        trans_status = "DONE"
-
-                                    cursor.execute("SELECT status FROM shifts WHERE id = (SELECT MAX(id) FROM shifts);")
-                                    shift_result = cursor.fetchone()
-                                    if shift_result:
-                                        shift_status = shift_result[0].upper()
-                                    else:
-                                        shift_status = "CLOSED"
-                                break
-                            except Exception:
-                                time.sleep(1)
-                            finally:
-                                if 'conn' in locals():
-                                    conn.close()
-                                    time.sleep(0.1)
-
-                    profiles_info.append({
-                        "name": f"[External] {os.path.basename(cash['path'])}",
-                        "path": cash["path"],
-                        "health": health,
-                        "trans_status": trans_status,
-                        "shift_status": shift_status,
-                        "version": version,
-                        "fiscal_number": fiscal_number,
-                        "is_running": is_running,
-                        "is_external": True
-                    })
-
+            profiles_info, is_empty = collect_profiles_info(manager_dir, is_rro_agent)
             stop_event.set()
             spinner_thread.join()
 
@@ -611,6 +623,13 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                         time.sleep(2)
                         stop_event.set()
                         spinner_thread.join()
+                    # Refresh profiles after restore
+                    stop_event = threading.Event()
+                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Refreshing profiles"))
+                    spinner_thread.start()
+                    profiles_info, is_empty = collect_profiles_info(manager_dir, is_rro_agent)
+                    stop_event.set()
+                    spinner_thread.join()
                     continue
 
                 if choice.lower().startswith("d") and len(choice) > 1:
@@ -678,7 +697,6 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                             spinner_thread.join()
                             continue
                         target_dirs = [selected_profile["path"]]
-                        break
                     elif choice_int == len(profiles_info) + 1:
                         for profile in profiles_info:
                             if profile["health"] == "BAD":
@@ -691,7 +709,6 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                                 spinner_thread.join()
                                 return False
                         target_dirs = [profile["path"] for profile in profiles_info]
-                        break
                     else:
                         print(f"{Fore.RED}✗ Invalid choice.{Style.RESET_ALL}")
                         stop_event = threading.Event()
@@ -700,6 +717,7 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                         time.sleep(2)
                         stop_event.set()
                         spinner_thread.join()
+                        continue
                 except ValueError:
                     print(f"{Fore.RED}✗ Invalid input.{Style.RESET_ALL}")
                     stop_event = threading.Event()
@@ -708,85 +726,210 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                     time.sleep(2)
                     stop_event.set()
                     spinner_thread.join()
+                    continue
 
-            for target_dir in target_dirs:
-                choice = input(
-                    f"{Fore.CYAN}Create backup of {os.path.basename(target_dir)} before updating? (Y/N): {Style.RESET_ALL}").strip().lower()
-                if choice == "y":
-                    backup_path = create_backup(target_dir)
-                    if not backup_path:
-                        print(f"{Fore.RED}✗ Backup failed. Continuing without backup...{Style.RESET_ALL}")
+                # Handle backups
+                for target_dir in target_dirs:
+                    choice = input(
+                        f"{Fore.CYAN}Create backup of {os.path.basename(target_dir)} before updating? (Y/N): {Style.RESET_ALL}").strip().lower()
+                    if choice == "y":
+                        backup_path = create_backup(target_dir)
+                        if not backup_path:
+                            print(f"{Fore.RED}✗ Backup failed. Continuing without backup...{Style.RESET_ALL}")
+                            stop_event = threading.Event()
+                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Backup failed"))
+                            spinner_thread.start()
+                            time.sleep(2)
+                            stop_event.set()
+                            spinner_thread.join()
+                    else:
+                        print(f"{Fore.GREEN}✓ Backup skipped.{Style.RESET_ALL}")
+
+                # Manage cash register processes
+                cash_processes = []
+                for target_dir in target_dirs:
+                    process = find_process_by_path("checkbox_kasa.exe", target_dir)
+                    if process:
+                        cash_processes.append(process)
+
+                manager_processes = find_all_processes_by_name("kasa_manager.exe")
+                manager_running = bool(manager_processes)
+                cash_running = bool(cash_processes)
+
+                if cash_running:
+                    print(f"{Fore.RED}⚠ Cash register process is running!{Style.RESET_ALL}")
+                    for proc in cash_processes:
+                        print(f" - PID: {proc.pid}")
+                    choice = input(f"{Fore.CYAN}Close cash register processes? (Y/N): {Style.RESET_ALL}").strip().lower()
+                    if choice == "y":
+                        print(f"{Fore.YELLOW}Stopping cash register processes...{Style.RESET_ALL}")
+                        for proc in cash_processes:
+                            try:
+                                proc.kill()
+                                print(f"{Fore.GREEN}✓ Stopped checkbox_kasa.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                                stop_event = threading.Event()
+                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process stopped"))
+                                spinner_thread.start()
+                                time.sleep(1)
+                                stop_event.set()
+                                spinner_thread.join()
+                            except psutil.NoSuchProcess:
+                                pass
+                            except Exception:
+                                print(f"{Fore.RED}✗ Failed to stop checkbox_kasa.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                        time.sleep(1)
+                    else:
+                        print(f"{Fore.RED}✗ Update cancelled.{Style.RESET_ALL}")
                         stop_event = threading.Event()
-                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Backup failed"))
+                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update cancelled"))
                         spinner_thread.start()
                         time.sleep(2)
                         stop_event.set()
                         spinner_thread.join()
+                        continue
+
+                    if manager_running:
+                        print(f"{Fore.YELLOW}Pausing manager processes...{Style.RESET_ALL}")
+                        for proc in manager_processes:
+                            try:
+                                proc.suspend()
+                                print(f"{Fore.GREEN}✓ Paused kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                                stop_event = threading.Event()
+                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process paused"))
+                                spinner_thread.start()
+                                time.sleep(1)
+                                stop_event.set()
+                                spinner_thread.join()
+                            except psutil.NoSuchProcess:
+                                pass
+                            except Exception:
+                                print(f"{Fore.RED}✗ Failed to pause kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                elif manager_running:
+                    print(f"{Fore.YELLOW}Cash register not running, manager running - proceeding...{Style.RESET_ALL}")
                 else:
-                    print(f"{Fore.GREEN}✓ Backup skipped.{Style.RESET_ALL}")
+                    print(f"{Fore.YELLOW}No cash register or manager processes found, proceeding...{Style.RESET_ALL}")
 
-            cash_processes = []
-            for target_dir in target_dirs:
-                process = find_process_by_path("checkbox_kasa.exe", target_dir)
-                if process:
-                    cash_processes.append(process)
+                # Monitor processes during update
+                stop_monitoring = threading.Event()
+                monitor_threads = []
+                processes_to_kill = ["checkbox_kasa.exe"]
+                for target_dir in target_dirs:
+                    thread = threading.Thread(target=manage_processes, args=(processes_to_kill, [target_dir], stop_monitoring))
+                    thread.start()
+                    monitor_threads.append(thread)
+                print(f"{Fore.CYAN}🔒 Monitoring processes during update...{Style.RESET_ALL}")
 
-            manager_processes = find_all_processes_by_name("kasa_manager.exe")
-            manager_running = bool(manager_processes)
-            cash_running = bool(cash_processes)
-
-            if cash_running:
-                print(f"{Fore.RED}⚠ Cash register process is running!{Style.RESET_ALL}")
-                for proc in cash_processes:
-                    print(f" - PID: {proc.pid}")
-                choice = input(f"{Fore.CYAN}Close cash register processes? (Y/N): {Style.RESET_ALL}").strip().lower()
-                if choice == "y":
-                    print(f"{Fore.YELLOW}Stopping cash register processes...{Style.RESET_ALL}")
-                    for proc in cash_processes:
-                        try:
-                            proc.kill()
-                            print(f"{Fore.GREEN}✓ Stopped checkbox_kasa.exe (PID: {proc.pid}).{Style.RESET_ALL}")
-                            stop_event = threading.Event()
-                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process stopped"))
-                            spinner_thread.start()
-                            time.sleep(1)
-                            stop_event.set()
-                            spinner_thread.join()
-                        except psutil.NoSuchProcess:
-                            pass
-                        except Exception:
-                            print(f"{Fore.RED}✗ Failed to stop checkbox_kasa.exe (PID: {proc.pid}).{Style.RESET_ALL}")
-                    time.sleep(1)
-                else:
-                    print(f"{Fore.RED}✗ Update cancelled.{Style.RESET_ALL}")
+                # Extract patch
+                print(f"{Fore.CYAN}📦 Extracting {patch_file_name}...{Style.RESET_ALL}")
+                try:
+                    with zipfile.ZipFile(patch_file_name, 'r') as zip_ref:
+                        total_files = len(zip_ref.infolist())
+                        if len(target_dirs) > 1:
+                            extract_to_multiple_dirs(zip_ref, target_dirs, total_files)
+                        else:
+                            with tqdm(total=total_files, desc="Extracting files",
+                                      bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}]") as pbar:
+                                for file_info in zip_ref.infolist():
+                                    target_path = os.path.join(target_dirs[0], file_info.filename)
+                                    if os.path.exists(target_path):
+                                        os.remove(target_path)
+                                    zip_ref.extract(file_info, target_dirs[0])
+                                    pbar.update(1)
+                        for target_dir in target_dirs:
+                            need_reboot_file = os.path.join(target_dir, ".need_reboot")
+                            if os.path.exists(need_reboot_file):
+                                os.remove(need_reboot_file)
+                    print(f"{Fore.GREEN}✓ Files updated successfully in {', '.join(target_dirs)}!{Style.RESET_ALL}")
+                except PermissionError:
+                    print(f"{Fore.RED}✗ Permission denied. Please close applications or run as administrator.{Style.RESET_ALL}")
                     stop_event = threading.Event()
-                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update cancelled"))
+                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Permission error"))
                     spinner_thread.start()
                     time.sleep(2)
                     stop_event.set()
                     spinner_thread.join()
                     return False
+                except zipfile.BadZipFile:
+                    print(f"{Fore.RED}✗ Invalid update file.{Style.RESET_ALL}")
+                    stop_event = threading.Event()
+                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid file"))
+                    spinner_thread.start()
+                    time.sleep(2)
+                    stop_event.set()
+                    spinner_thread.join()
+                    return False
+                except Exception as e:
+                    print(f"{Fore.RED}✗ Update error: {e}{Style.RESET_ALL}")
+                    stop_event = threading.Event()
+                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update error"))
+                    spinner_thread.start()
+                    time.sleep(2)
+                    stop_event.set()
+                    spinner_thread.join()
+                    return False
+                finally:
+                    stop_monitoring.set()
+                    for thread in monitor_threads:
+                        try:
+                            thread.join()
+                        except Exception:
+                            pass
+                    print(f"{Fore.GREEN}✓ Process monitoring stopped.{Style.RESET_ALL}")
 
-                if manager_running:
-                    print(f"{Fore.YELLOW}Pausing manager processes...{Style.RESET_ALL}")
+                # Launch updated applications
+                for target_dir in target_dirs:
+                    try:
+                        kasa_path = os.path.join(target_dir, "checkbox_kasa.exe")
+                        if os.path.exists(kasa_path):
+                            print(f"{Fore.CYAN}🚀 Launching cash register...{Style.RESET_ALL}")
+                            cmd = f'start cmd /K "{kasa_path}"'
+                            subprocess.Popen(cmd, cwd=target_dir, shell=True)
+                            print(f"{Fore.GREEN}✓ Cash register launched successfully!{Style.RESET_ALL}")
+                            stop_event = threading.Event()
+                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Cash register launched"))
+                            spinner_thread.start()
+                            time.sleep(10)
+                            stop_event.set()
+                            spinner_thread.join()
+                        else:
+                            print(f"{Fore.YELLOW}⚠ Cash register executable not found.{Style.RESET_ALL}")
+                    except Exception as e:
+                        print(f"{Fore.RED}✗ Failed to launch process: {e}{Style.RESET_ALL}")
+
+                # Resume manager processes if paused
+                if cash_running and manager_running and 'manager_processes' in locals():
+                    print(f"{Fore.YELLOW}Resuming manager processes...{Style.RESET_ALL}")
                     for proc in manager_processes:
                         try:
-                            proc.suspend()
-                            print(f"{Fore.GREEN}✓ Paused kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                            proc.resume()
+                            print(f"{Fore.GREEN}✓ Resumed kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
                             stop_event = threading.Event()
-                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process paused"))
+                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process resumed"))
                             spinner_thread.start()
                             time.sleep(1)
                             stop_event.set()
                             spinner_thread.join()
                         except psutil.NoSuchProcess:
-                            pass
-                        except Exception:
-                            print(f"{Fore.RED}✗ Failed to pause kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
-            elif manager_running:
-                print(f"{Fore.YELLOW}Cash register not running, manager running - proceeding...{Style.RESET_ALL}")
-            else:
-                print(f"{Fore.YELLOW}No cash register or manager processes found, proceeding...{Style.RESET_ALL}")
+                            print(f"{Fore.YELLOW}⚠ kasa_manager.exe (PID: {proc.pid}) already terminated.{Style.RESET_ALL}")
+                        except Exception as e:
+                            print(f"{Fore.RED}✗ Failed to resume kasa_manager.exe: {e}{Style.RESET_ALL}")
+
+                # Refresh profiles after patching
+                stop_event = threading.Event()
+                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Refreshing profiles"))
+                spinner_thread.start()
+                profiles_info, is_empty = collect_profiles_info(manager_dir, is_rro_agent)
+                stop_event.set()
+                spinner_thread.join()
+
+                # Display update completion
+                stop_event = threading.Event()
+                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update completed"))
+                spinner_thread.start()
+                time.sleep(1)
+                stop_event.set()
+                spinner_thread.join()
+                continue
 
         else:
             target_dirs = [install_dir]
@@ -794,23 +937,21 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
             if not manage_processes(processes_to_kill, target_dirs):
                 return False
 
-        stop_monitoring = threading.Event()
-        monitor_threads = []
-        processes_to_kill = ["checkbox_kasa.exe"] if is_rro_agent else (
-            ["CheckboxPayLink.exe", "POSServer.exe"] if is_paylink else ["kasa_manager.exe"])
-        for target_dir in target_dirs:
-            thread = threading.Thread(target=manage_processes, args=(processes_to_kill, [target_dir], stop_monitoring))
-            thread.start()
-            monitor_threads.append(thread)
-        print(f"{Fore.CYAN}🔒 Monitoring processes during update...{Style.RESET_ALL}")
+            # Monitor processes during update
+            stop_monitoring = threading.Event()
+            monitor_threads = []
+            processes_to_kill = ["CheckboxPayLink.exe", "POSServer.exe"] if is_paylink else ["kasa_manager.exe"]
+            for target_dir in target_dirs:
+                thread = threading.Thread(target=manage_processes, args=(processes_to_kill, [target_dir], stop_monitoring))
+                thread.start()
+                monitor_threads.append(thread)
+            print(f"{Fore.CYAN}🔒 Monitoring processes during update...{Style.RESET_ALL}")
 
-        print(f"{Fore.CYAN}📦 Extracting {patch_file_name}...{Style.RESET_ALL}")
-        try:
-            with zipfile.ZipFile(patch_file_name, 'r') as zip_ref:
-                total_files = len(zip_ref.infolist())
-                if is_rro_agent and len(target_dirs) > 1:
-                    extract_to_multiple_dirs(zip_ref, target_dirs, total_files)
-                else:
+            # Extract patch
+            print(f"{Fore.CYAN}📦 Extracting {patch_file_name}...{Style.RESET_ALL}")
+            try:
+                with zipfile.ZipFile(patch_file_name, 'r') as zip_ref:
+                    total_files = len(zip_ref.infolist())
                     with tqdm(total=total_files, desc="Extracting files",
                               bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}]") as pbar:
                         for file_info in zip_ref.infolist():
@@ -819,109 +960,76 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                                 os.remove(target_path)
                             zip_ref.extract(file_info, target_dirs[0])
                             pbar.update(1)
-                for target_dir in target_dirs:
-                    need_reboot_file = os.path.join(target_dir, ".need_reboot")
+                    need_reboot_file = os.path.join(target_dirs[0], ".need_reboot")
                     if os.path.exists(need_reboot_file):
                         os.remove(need_reboot_file)
-            print(f"{Fore.GREEN}✓ Files updated successfully in {', '.join(target_dirs)}!{Style.RESET_ALL}")
-        except PermissionError:
-            print(f"{Fore.RED}✗ Permission denied. Please close applications or run as administrator.{Style.RESET_ALL}")
-            stop_event = threading.Event()
-            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Permission error"))
-            spinner_thread.start()
-            time.sleep(2)
-            stop_event.set()
-            spinner_thread.join()
-            return False
-        except zipfile.BadZipFile:
-            print(f"{Fore.RED}✗ Invalid update file.{Style.RESET_ALL}")
-            stop_event = threading.Event()
-            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid file"))
-            spinner_thread.start()
-            time.sleep(2)
-            stop_event.set()
-            spinner_thread.join()
-            return False
-        except Exception as e:
-            print(f"{Fore.RED}✗ Update error: {e}{Style.RESET_ALL}")
-            stop_event = threading.Event()
-            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update error"))
-            spinner_thread.start()
-            time.sleep(2)
-            stop_event.set()
-            spinner_thread.join()
-            return False
-        finally:
-            stop_monitoring.set()
-            for thread in monitor_threads:
-                try:
-                    thread.join()
-                except Exception:
-                    pass
-            print(f"{Fore.GREEN}✓ Process monitoring stopped.{Style.RESET_ALL}")
+                print(f"{Fore.GREEN}✓ Files updated successfully in {target_dirs[0]}!{Style.RESET_ALL}")
+            except PermissionError:
+                print(f"{Fore.RED}✗ Permission denied. Please close applications or run as administrator.{Style.RESET_ALL}")
+                stop_event = threading.Event()
+                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Permission error"))
+                spinner_thread.start()
+                time.sleep(2)
+                stop_event.set()
+                spinner_thread.join()
+                return False
+            except zipfile.BadZipFile:
+                print(f"{Fore.RED}✗ Invalid update file.{Style.RESET_ALL}")
+                stop_event = threading.Event()
+                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid file"))
+                spinner_thread.start()
+                time.sleep(2)
+                stop_event.set()
+                spinner_thread.join()
+                return False
+            except Exception as e:
+                print(f"{Fore.RED}✗ Update error: {e}{Style.RESET_ALL}")
+                stop_event = threading.Event()
+                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update error"))
+                spinner_thread.start()
+                time.sleep(2)
+                stop_event.set()
+                spinner_thread.join()
+                return False
+            finally:
+                stop_monitoring.set()
+                for thread in monitor_threads:
+                    try:
+                        thread.join()
+                    except Exception:
+                        pass
+                print(f"{Fore.GREEN}✓ Process monitoring stopped.{Style.RESET_ALL}")
 
-        for target_dir in target_dirs:
+            # Launch updated applications
             try:
-                if is_rro_agent:
-                    kasa_path = os.path.join(target_dir, "checkbox_kasa.exe")
-                    if os.path.exists(kasa_path):
-                        print(f"{Fore.CYAN}🚀 Launching cash register...{Style.RESET_ALL}")
-                        cmd = f'start cmd /K "{kasa_path}"'
-                        subprocess.Popen(cmd, cwd=target_dir, shell=True)
-                        print(f"{Fore.GREEN}✓ Cash register launched successfully!{Style.RESET_ALL}")
-                        stop_event = threading.Event()
-                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Cash register launched"))
-                        spinner_thread.start()
-                        time.sleep(10)
-                        stop_event.set()
-                        spinner_thread.join()
-                    else:
-                        print(f"{Fore.YELLOW}⚠ Cash register executable not found.{Style.RESET_ALL}")
-
-                elif is_paylink:
-                    paylink_path = os.path.join(target_dir, "CheckboxPayLink.exe")
+                if is_paylink:
+                    paylink_path = os.path.join(target_dirs[0], "CheckboxPayLink.exe")
                     if os.path.exists(paylink_path):
                         print(f"{Fore.CYAN}🚀 Launching PayLink...{Style.RESET_ALL}")
-                        subprocess.Popen(f'start "" "{paylink_path}"', cwd=target_dir, shell=True)
+                        subprocess.Popen(f'start "" "{paylink_path}"', cwd=target_dirs[0], shell=True)
                         print(f"{Fore.GREEN}✓ PayLink launched successfully!{Style.RESET_ALL}")
                     else:
                         print(f"{Fore.YELLOW}⚠ PayLink executable not found.{Style.RESET_ALL}")
-
                 else:
-                    manager_path = os.path.join(target_dir, "kasa_manager.exe")
+                    manager_path = os.path.join(target_dirs[0], "kasa_manager.exe")
                     if os.path.exists(manager_path):
                         print(f"{Fore.CYAN}🚀 Launching manager...{Style.RESET_ALL}")
-                        subprocess.Popen(f'start "" "{manager_path}"', cwd=target_dir, shell=True)
+                        subprocess.Popen(f'start "" "{manager_path}"', cwd=target_dirs[0], shell=True)
                         print(f"{Fore.GREEN}✓ Manager launched successfully!{Style.RESET_ALL}")
                     else:
                         print(f"{Fore.YELLOW}⚠ Manager executable not found.{Style.RESET_ALL}")
             except Exception as e:
                 print(f"{Fore.RED}✗ Failed to launch process: {e}{Style.RESET_ALL}")
 
-        if is_rro_agent and cash_running and manager_running and 'manager_processes' in locals():
-            print(f"{Fore.YELLOW}Resuming manager processes...{Style.RESET_ALL}")
-            for proc in manager_processes:
-                try:
-                    proc.resume()
-                    print(f"{Fore.GREEN}✓ Resumed kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
-                    stop_event = threading.Event()
-                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process resumed"))
-                    spinner_thread.start()
-                    time.sleep(1)
-                    stop_event.set()
-                    spinner_thread.join()
-                except psutil.NoSuchProcess:
-                    print(f"{Fore.YELLOW}⚠ kasa_manager.exe (PID: {proc.pid}) already terminated.{Style.RESET_ALL}")
-                except Exception as e:
-                    print(f"{Fore.RED}✗ Failed to resume kasa_manager.exe: {e}{Style.RESET_ALL}")
+            # Display update completion
+            stop_event = threading.Event()
+            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update completed"))
+            spinner_thread.start()
+            time.sleep(1)
+            stop_event.set()
+            spinner_thread.join()
+            return True
 
-        stop_event = threading.Event()
-        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update completed"))
-        spinner_thread.start()
-        time.sleep(1)
-        stop_event.set()
-        spinner_thread.join()
-        return True
     except Exception as e:
         print(f"{Fore.RED}✗ Update error: {e}{Style.RESET_ALL}")
         stop_event = threading.Event()

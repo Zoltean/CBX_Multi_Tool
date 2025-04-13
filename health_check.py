@@ -158,7 +158,7 @@ def get_cash_register_info(cash_path: str, is_external: bool = False) -> Dict:
                     conn.close()
                     time.sleep(0.1)
 
-    name = f"[External] {os.path.basename(cash_path)}" if is_external else os.path.basename(cash_path)
+    name = f"[Ext] {os.path.basename(cash_path)}" if is_external else os.path.basename(cash_path)
     return {
         "name": name,
         "path": cash_path,
