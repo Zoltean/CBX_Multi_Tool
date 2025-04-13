@@ -542,7 +542,7 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                     status_text = "ON" if profile["is_running"] else "OFF"
                     status_color = Fore.RED if profile["is_running"] else Fore.GREEN
                     profile_str = (
-                        f"| {Fore.YELLOW}FN:{profile['fiscal_number']}{Style.RESET_ALL} "
+                        f"| {Fore.YELLOW}FN: {profile['fiscal_number']}{Style.RESET_ALL} "
                         f"| {status_color}{status_text}{Style.RESET_ALL} "
                         f"| H:{health_color}{profile['health']}{Style.RESET_ALL} "
                         f"| T:{trans_color}{profile['trans_status']}{Style.RESET_ALL} "
