@@ -6,14 +6,13 @@ import threading
 import platform
 from colorama import init, Fore, Style
 
-from config import PROGRAM_TITLE, VPS_API_URL
+from config import PROGRAM_TITLE, VPS_API_URL, VPS_CONFIG_URL
 from network import check_for_updates, fetch_json
 from menu import display_menu
 from utils import is_admin, show_spinner
 from cleanup import cleanup
 
 init()
-
 
 def main():
     print(f"{Fore.CYAN}{'=' * 40}{Style.RESET_ALL}")
@@ -26,13 +25,14 @@ def main():
             stop_event = threading.Event()
             spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Checking permissions"))
             spinner_thread.start()
-            time.sleep(2)
+            time.sleep(3)
             stop_event.set()
             spinner_thread.join()
         else:
             print(f"{Fore.GREEN}✓ Admin privileges confirmed.{Style.RESET_ALL}")
 
         update_available, download_url = check_for_updates()
+
         data = fetch_json(VPS_API_URL)
 
         if not data:
@@ -103,7 +103,6 @@ def main():
     except Exception as e:
         print(f"{Fore.RED}✗ Error: {e}{Style.RESET_ALL}")
         input("\nPress Enter to exit...")
-
 
 if __name__ == "__main__":
     main()

@@ -91,8 +91,7 @@ def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Di
 
             if is_top_level:
                 for key, value in ordered_items:
-                    name = key.capitalize() if isinstance(value, dict) else value.get("name", value.get("patch_name",
-                                                                                                        key.capitalize()))
+                    name = key.capitalize() if isinstance(value, dict) else value.get("name", value.get("patch_name", key.capitalize()))
                     print(f"{Fore.WHITE}{current_index}. {name}{Style.RESET_ALL}")
                     current_index += 1
             else:
@@ -105,10 +104,7 @@ def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Di
                         current_index += 1
                     print()
 
-                cash_registers = [item for item in ordered_items if
-                                  "rro_agent" in item[0].lower() and "tools" not in item[0].lower() or
-                                  (title.lower() == "cloudlike" and "kasa_manager" not in item[
-                                      0].lower() and "paylink" not in item[0].lower())]
+                cash_registers = [item for item in ordered_items if "rro_agent" in item[0].lower() and "tools" not in item[0].lower() or (title.lower() == "cloudlike" and "kasa_manager" not in item[0].lower() and "paylink" not in item[0].lower())]
                 if cash_registers:
                     print(f"{Fore.GREEN}=== Cash Registers ==={Style.RESET_ALL}")
                     for key, value in cash_registers:
@@ -229,13 +225,9 @@ def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Di
                     elif "patch_url" in value:
                         is_rro_agent = "rro_agent" in key.lower() and "tools" not in key.lower()
                         is_paylink = "paylink" in key.lower()
-                        patch_file(value, "checkbox.kasa.manager" if not (
-                                    is_rro_agent or is_paylink) else "Checkbox PayLink (Beta)" if is_paylink else "checkbox.kasa.manager",
-                                   data, is_rro_agent, is_paylink)
+                        patch_file(value, "checkbox.kasa.manager" if not (is_rro_agent or is_paylink) else "Checkbox PayLink (Beta)" if is_paylink else "checkbox.kasa.manager", data, is_rro_agent, is_paylink)
                     else:
-                        display_menu(key.capitalize(), value, data,
-                                     parent_menu={"title": title, "options": options},
-                                     update_available=update_available, download_url=download_url)
+                        display_menu(key.capitalize(), value, data, parent_menu={"title": title, "options": options}, update_available=update_available, download_url=download_url)
                 else:
                     print(f"{Fore.RED}✗ Invalid option!{Style.RESET_ALL}")
                     stop_event = threading.Event()
