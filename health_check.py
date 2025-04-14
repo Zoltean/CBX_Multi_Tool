@@ -1,179 +1,30 @@
 # -*- coding: utf-8 -*-
+import json
 import os
 import subprocess
 import time
 import threading
-import sqlite3
-from sqlite3 import Error
-from typing import Dict
-import json
-import requests
-import glob
+import logging
+from typing import Dict, List
 
 import psutil
-from colorama import Fore, Style
-
+import requests
+from colorama import Fore, Style, init
 from config import DRIVES
 from utils import show_spinner, find_process_by_path, find_all_processes_by_name
 from cleanup import cleanup
+from search_utils import find_manager_by_exe, find_cash_registers_by_profiles_json, find_cash_registers_by_exe, get_cash_register_info, reset_cache
 
-def find_external_cash_registers_by_processes() -> list:
-    """
-    Finds cash registers by checking running processes for checkbox_kasa.exe.
-    """
-    external_cashes = []
-    seen_paths = set()
+# Инициализация colorama
+init(autoreset=True)
 
-    for proc in psutil.process_iter(['pid', 'exe', 'cwd']):
-        try:
-            if proc.name().lower() == "checkbox_kasa.exe":
-                proc_cwd = os.path.normpath(proc.cwd()).lower()
-                if proc_cwd not in seen_paths:
-                    seen_paths.add(proc_cwd)
-                    external_cashes.append({
-                        "path": proc_cwd,
-                        "source": "process"
-                    })
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-
-    return external_cashes
-
-def find_external_cash_registers_by_filesystem(manager_dir: str, seen_paths: set) -> list:
-    """
-    Performs a recursive search for cash registers within the manager's profiles directory (depth of 2).
-    Excludes paths already seen to avoid duplicates.
-    """
-    external_cashes = []
-
-    pattern = os.path.join(manager_dir, "profiles", "*", "checkbox_kasa.exe")
-    try:
-        for kasa_exe in glob.glob(pattern, recursive=False):
-            kasa_dir = os.path.normpath(os.path.dirname(kasa_exe)).lower()
-            if kasa_dir not in seen_paths:
-                seen_paths.add(kasa_dir)
-                external_cashes.append({
-                    "path": kasa_dir,
-                    "source": "filesystem"
-                })
-    except Exception:
-        pass
-
-    return external_cashes
-
-def find_cash_registers_by_profiles_json(manager_dir: str) -> tuple[list, bool, set]:
-    """
-    Reads profiles.json to find cash register locations.
-    Returns a list of cash registers, a boolean indicating if the file is empty, and a set of seen paths.
-    """
-    profiles_json_path = os.path.join(manager_dir, "profiles.json")
-    cash_registers = []
-    is_empty = False
-    seen_paths = set()
-
-    if not os.path.exists(profiles_json_path):
-        return cash_registers, False, seen_paths
-
-    try:
-        with open(profiles_json_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        profiles = data.get("profiles", {})
-        if not profiles:
-            is_empty = True
-        else:
-            for profile_id, profile in profiles.items():
-                exec_path = profile.get("local", {}).get("paths", {}).get("exec_path", "")
-                if exec_path and os.path.exists(exec_path):
-                    norm_path = os.path.normpath(exec_path).lower()
-                    seen_paths.add(norm_path)
-                    cash_registers.append({
-                        "path": norm_path,
-                        "source": "profiles_json"
-                    })
-    except Exception:
-        pass
-
-    return cash_registers, is_empty, seen_paths
-
-def get_cash_register_info(cash_path: str, is_external: bool = False) -> Dict:
-    db_path = os.path.join(cash_path, "agent.db")
-    version = "Unknown"
-    fiscal_number = "Unknown"
-    health = "BAD"
-    trans_status = "ERROR"
-    shift_status = "OPENED"
-    is_running = bool(find_process_by_path("checkbox_kasa.exe", cash_path))
-
-    try:
-        version_path = os.path.join(cash_path, "version")
-        if os.path.exists(version_path):
-            with open(version_path, "r", encoding="utf-8") as f:
-                version = f.read().strip()
-    except Exception:
-        pass
-
-    if os.path.exists(db_path):
-        try:
-            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
-            cursor = conn.cursor()
-            cursor.execute("SELECT fiscal_number FROM cash_register LIMIT 1;")
-            result = cursor.fetchone()
-            if result and result[0]:
-                fiscal_number = result[0]
-            conn.close()
-        except Error:
-            pass
-
-        for attempt in range(3):
-            try:
-                conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
-                cursor = conn.cursor()
-
-                cursor.execute("PRAGMA integrity_check;")
-                result = cursor.fetchone()[0]
-                if result == "ok":
-                    health = "OK"
-                    cursor.execute("SELECT status FROM transactions;")
-                    statuses = [row[0] for row in cursor.fetchall()]
-                    if not statuses:
-                        trans_status = "EMPTY"
-                    elif any(s == "ERROR" for s in statuses):
-                        trans_status = "ERROR"
-                    elif any(s == "PENDING" for s in statuses):
-                        trans_status = "PENDING"
-                    else:
-                        trans_status = "DONE"
-
-                    cursor.execute("SELECT status FROM shifts WHERE id = (SELECT MAX(id) FROM shifts);")
-                    shift_result = cursor.fetchone()
-                    if shift_result:
-                        shift_status = shift_result[0].upper()
-                    else:
-                        shift_status = "CLOSED"
-                break
-            except Error:
-                time.sleep(2)
-            finally:
-                if 'conn' in locals():
-                    conn.close()
-                    time.sleep(0.1)
-
-    name = f"[Ext] {os.path.basename(cash_path)}" if is_external else os.path.basename(cash_path)
-    return {
-        "name": name,
-        "path": cash_path,
-        "health": health,
-        "trans_status": trans_status,
-        "shift_status": shift_status,
-        "version": version,
-        "fiscal_number": fiscal_number,
-        "is_running": is_running,
-        "is_external": is_external
-    }
+# Настройка логирования
+#logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def check_cash_profiles(data: Dict):
+    cache_valid = False  # Флаг для отслеживания, нужно ли использовать кэш
     while True:
-        os.system("cls")
+        os.system("cls" if os.name == "nt" else "clear")
         print(f"{Fore.CYAN}{'=' * 50}{Style.RESET_ALL}")
         print(f"{Fore.CYAN} CASH REGISTER HEALTH CHECK ".center(50) + f"{Style.RESET_ALL}")
         print(f"{Fore.CYAN}{'=' * 50}{Style.RESET_ALL}\n")
@@ -185,43 +36,51 @@ def check_cash_profiles(data: Dict):
         try:
             profiles_info = []
             manager_dir = None
-            target_folder = "checkbox.kasa.manager"
+            seen_paths = set()
+            profile_paths = set()
 
-            # Find manager directory
-            for drive in DRIVES:
-                path = f"{drive}\\{target_folder}"
-                if os.path.exists(path):
-                    manager_dir = path
-                    break
-
-            if manager_dir:
-                # Check profiles.json
-                cash_registers, is_empty, seen_paths = find_cash_registers_by_profiles_json(manager_dir)
-                if is_empty:
-                    print(f"{Fore.RED}! ! ! PROFILES.JSON ARE EMPTY ! ! !{Style.RESET_ALL}")
-
-                # Add cash registers from profiles.json (non-external)
-                for cash in cash_registers:
-                    profiles_info.append(get_cash_register_info(cash["path"], is_external=False))
-
-                # Always perform filesystem search to find additional cash registers
-                external_cashes = find_external_cash_registers_by_filesystem(manager_dir, seen_paths)
-                for cash in external_cashes:
-                    profiles_info.append(get_cash_register_info(cash["path"], is_external=True))
+            # 1. Ищем manager_dir через kasa_manager.exe
+            manager_dir = find_manager_by_exe(DRIVES, use_cache=cache_valid)
+            if not manager_dir:
+                logging.error("Manager directory or kasa_manager.exe not found")
+                print(f"{Fore.RED}✗ Manager directory or kasa_manager.exe not found!{Style.RESET_ALL}")
             else:
-                # If no manager directory, search for running processes
-                external_cashes = find_external_cash_registers_by_processes()
-                for cash in external_cashes:
-                    profiles_info.append(get_cash_register_info(cash["path"], is_external=True))
+                logging.debug(f"Manager directory found: {manager_dir}")
+
+            # 2. Если manager_dir найден, сначала читаем profiles.json
+            if manager_dir:
+                profile_cashes, is_empty, profile_seen_paths = find_cash_registers_by_profiles_json(manager_dir, use_cache=cache_valid)
+                if is_empty:
+                    logging.warning("PROFILES.JSON IS EMPTY")
+                    print(f"{Fore.RED}! ! ! PROFILES.JSON IS EMPTY ! ! !{Style.RESET_ALL}")
+                for cash in profile_cashes:
+                    normalized_path = os.path.normpath(os.path.abspath(cash["path"]))
+                    if normalized_path not in seen_paths:
+                        profiles_info.append(get_cash_register_info(cash["path"], is_external=False))
+                        seen_paths.add(normalized_path)
+                        profile_paths.add(normalized_path)
+                        logging.info(f"Added cash register from profiles.json: {normalized_path}")
+
+            # 3. Ищем кассы через checkbox_kasa.exe
+            cash_registers = find_cash_registers_by_exe(manager_dir, DRIVES, use_cache=cache_valid)
+            for cash in cash_registers:
+                normalized_path = os.path.normpath(os.path.abspath(cash["path"]))
+                if normalized_path not in seen_paths:
+                    is_external = normalized_path not in profile_paths
+                    profiles_info.append(get_cash_register_info(cash["path"], is_external=is_external))
+                    seen_paths.add(normalized_path)
+                    logging.info(f"Added cash register from {cash['source']}: {normalized_path} (is_external={is_external})")
 
             stop_event.set()
             spinner_thread.join()
 
             if not profiles_info:
-                print(f"{Fore.RED}✗ No profiles or external cash registers found!{Style.RESET_ALL}")
+                logging.error("No cash registers found")
+                print(f"{Fore.RED}✗ No cash registers found!{Style.RESET_ALL}")
                 input(f"{Fore.CYAN}Press Enter to continue...{Style.RESET_ALL}")
                 return
 
+            logging.info(f"Found {len(profiles_info)} cash registers")
             print(f"{Fore.CYAN}Found {len(profiles_info)} cash registers:{Style.RESET_ALL}\n")
             for i, profile in enumerate(profiles_info, 1):
                 health_color = Fore.GREEN if profile["health"] == "OK" else Fore.RED
@@ -252,6 +111,7 @@ def check_cash_profiles(data: Dict):
             choice = input(f"{Fore.CYAN}Enter your choice: {Style.RESET_ALL}").strip()
 
             if choice.lower() == "q":
+                logging.info("Initiating cleanup and exit")
                 print(f"{Fore.CYAN}🧹 Initiating cleanup and exit...{Style.RESET_ALL}")
                 stop_event = threading.Event()
                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Cleaning up"))
@@ -263,26 +123,28 @@ def check_cash_profiles(data: Dict):
                 return
 
             if choice == "0":
+                logging.info("Attempting to return to main menu")
                 print(f"{Fore.GREEN}✓ Returning to main menu...{Style.RESET_ALL}")
-                stop_event = threading.Event()
-                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Returning"))
-                spinner_thread.start()
-                time.sleep(1)
-                stop_event.set()
+                cache_valid = True  # Кэш остается валидным
+                stop_event.set()  # Гарантируем завершение текущего спиннера
                 spinner_thread.join()
-                return
+                logging.debug("Exiting check_cash_profiles for main menu")
+                return  # Завершаем функцию
 
             if choice.lower().startswith("o") and len(choice) > 1:
                 try:
                     profile_num = int(choice[1:])
                     if 1 <= profile_num <= len(profiles_info):
                         selected_profile = profiles_info[profile_num - 1]
-                        folder_path = selected_profile['path']
+                        folder_path = os.path.normpath(os.path.abspath(selected_profile['path']))
+                        logging.info(f"Opening folder: {folder_path}")
                         if os.path.exists(folder_path):
                             os.startfile(folder_path)
                             print(f"{Fore.GREEN}✓ Opened folder {folder_path}{Style.RESET_ALL}")
                         else:
+                            logging.error(f"Folder not found: {folder_path}")
                             print(f"{Fore.RED}✗ Folder not found: {folder_path}{Style.RESET_ALL}")
+                        cache_valid = True  # Кэш остается валидным
                         stop_event = threading.Event()
                         spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Folder opened"))
                         spinner_thread.start()
@@ -290,6 +152,7 @@ def check_cash_profiles(data: Dict):
                         stop_event.set()
                         spinner_thread.join()
                     else:
+                        logging.error(f"Invalid profile number: {profile_num}")
                         print(f"{Fore.RED}✗ Invalid profile number!{Style.RESET_ALL}")
                         stop_event = threading.Event()
                         spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid choice"))
@@ -298,6 +161,7 @@ def check_cash_profiles(data: Dict):
                         stop_event.set()
                         spinner_thread.join()
                 except ValueError:
+                    logging.error(f"Invalid format for choice: {choice}")
                     print(f"{Fore.RED}✗ Invalid format! Use O<number> (e.g., O1){Style.RESET_ALL}")
                     stop_event = threading.Event()
                     spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid input"))
@@ -312,6 +176,7 @@ def check_cash_profiles(data: Dict):
                     profile_num = int(choice[1:])
                     if 1 <= profile_num <= len(profiles_info):
                         selected_profile = profiles_info[profile_num - 1]
+                        logging.info(f"Updating config for {selected_profile['name']}")
                         print(f"{Fore.CYAN}Updating config for {selected_profile['name']}...{Style.RESET_ALL}")
 
                         license_key = input(f"{Fore.CYAN}Enter license_key (or press Enter to skip): {Style.RESET_ALL}").strip()
@@ -324,6 +189,7 @@ def check_cash_profiles(data: Dict):
                         if kasa_process:
                             try:
                                 kasa_process.kill()
+                                logging.info(f"Stopped checkbox_kasa.exe (PID: {kasa_process.pid})")
                                 print(f"{Fore.GREEN}✓ Stopped checkbox_kasa.exe (PID: {kasa_process.pid}){Style.RESET_ALL}")
                                 stop_event = threading.Event()
                                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process stopped"))
@@ -332,8 +198,9 @@ def check_cash_profiles(data: Dict):
                                 stop_event.set()
                                 spinner_thread.join()
                             except psutil.NoSuchProcess:
-                                pass
+                                logging.warning("Process already terminated")
                             except Exception as e:
+                                logging.error(f"Failed to stop process: {e}")
                                 print(f"{Fore.RED}✗ Failed to stop process: {e}{Style.RESET_ALL}")
                                 stop_event = threading.Event()
                                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process error"))
@@ -344,16 +211,18 @@ def check_cash_profiles(data: Dict):
                                 continue
 
                         if manager_processes:
+                            logging.info("Suspending manager processes...")
                             print(f"{Fore.YELLOW}⏸ Suspending manager processes...{Style.RESET_ALL}")
                             for proc in manager_processes:
                                 try:
                                     proc.suspend()
+                                    logging.info(f"Suspended kasa_manager.exe (PID: {proc.pid})")
                                     print(f"{Fore.GREEN}✓ Suspended kasa_manager.exe (PID: {proc.pid}){Style.RESET_ALL}")
                                     manager_suspended = True
                                 except psutil.NoSuchProcess:
-                                    pass
-                                except Exception:
-                                    pass
+                                    logging.warning(f"Process {proc.pid} already terminated")
+                                except Exception as e:
+                                    logging.error(f"Failed to suspend process {proc.pid}: {e}")
                             stop_event = threading.Event()
                             spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Processes suspended"))
                             spinner_thread.start()
@@ -361,8 +230,9 @@ def check_cash_profiles(data: Dict):
                             stop_event.set()
                             spinner_thread.join()
 
-                        config_path = os.path.join(selected_profile['path'], "config.json")
+                        config_path = os.path.normpath(os.path.join(selected_profile['path'], "config.json"))
                         if not os.path.exists(config_path):
+                            logging.error(f"config.json not found at {config_path}")
                             print(f"{Fore.RED}✗ config.json not found!{Style.RESET_ALL}")
                             stop_event = threading.Event()
                             spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Config error"))
@@ -371,15 +241,17 @@ def check_cash_profiles(data: Dict):
                             stop_event.set()
                             spinner_thread.join()
                             if manager_suspended and manager_processes:
+                                logging.info("Resuming manager processes...")
                                 print(f"{Fore.YELLOW}▶ Resuming manager processes...{Style.RESET_ALL}")
                                 for proc in manager_processes:
                                     try:
                                         proc.resume()
+                                        logging.info(f"Resumed kasa_manager.exe (PID: {proc.pid})")
                                         print(f"{Fore.GREEN}✓ Resumed kasa_manager.exe (PID: {proc.pid}){Style.RESET_ALL}")
                                     except psutil.NoSuchProcess:
-                                        pass
-                                    except Exception:
-                                        pass
+                                        logging.warning(f"Process {proc.pid} already terminated")
+                                    except Exception as e:
+                                        logging.error(f"Failed to resume process {proc.pid}: {e}")
                                 stop_event = threading.Event()
                                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Processes resumed"))
                                 spinner_thread.start()
@@ -391,7 +263,8 @@ def check_cash_profiles(data: Dict):
                         try:
                             with open(config_path, "r", encoding="utf-8") as f:
                                 config = json.load(f)
-                        except Exception as e:
+                        except json.JSONDecodeError as e:
+                            logging.error(f"Failed to parse config.json: {e}")
                             print(f"{Fore.RED}✗ Error reading config.json: {e}{Style.RESET_ALL}")
                             stop_event = threading.Event()
                             spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Config error"))
@@ -400,15 +273,45 @@ def check_cash_profiles(data: Dict):
                             stop_event.set()
                             spinner_thread.join()
                             if manager_suspended and manager_processes:
+                                logging.info("Resuming manager processes...")
                                 print(f"{Fore.YELLOW}▶ Resuming manager processes...{Style.RESET_ALL}")
                                 for proc in manager_processes:
                                     try:
                                         proc.resume()
+                                        logging.info(f"Resumed kasa_manager.exe (PID: {proc.pid})")
                                         print(f"{Fore.GREEN}✓ Resumed kasa_manager.exe (PID: {proc.pid}){Style.RESET_ALL}")
                                     except psutil.NoSuchProcess:
-                                        pass
-                                    except Exception:
-                                        pass
+                                        logging.warning(f"Process {proc.pid} already terminated")
+                                    except Exception as e:
+                                        logging.error(f"Failed to resume process {proc.pid}: {e}")
+                                stop_event = threading.Event()
+                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Processes resumed"))
+                                spinner_thread.start()
+                                time.sleep(1)
+                                stop_event.set()
+                                spinner_thread.join()
+                            continue
+                        except Exception as e:
+                            logging.error(f"Unexpected error reading config.json: {e}")
+                            print(f"{Fore.RED}✗ Error reading config.json: {e}{Style.RESET_ALL}")
+                            stop_event = threading.Event()
+                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Config error"))
+                            spinner_thread.start()
+                            time.sleep(2)
+                            stop_event.set()
+                            spinner_thread.join()
+                            if manager_suspended and manager_processes:
+                                logging.info("Resuming manager processes...")
+                                print(f"{Fore.YELLOW}▶ Resuming manager processes...{Style.RESET_ALL}")
+                                for proc in manager_processes:
+                                    try:
+                                        proc.resume()
+                                        logging.info(f"Resumed kasa_manager.exe (PID: {proc.pid})")
+                                        print(f"{Fore.GREEN}✓ Resumed kasa_manager.exe (PID: {proc.pid}){Style.RESET_ALL}")
+                                    except psutil.NoSuchProcess:
+                                        logging.warning(f"Process {proc.pid} already terminated")
+                                    except Exception as e:
+                                        logging.error(f"Failed to resume process {proc.pid}: {e}")
                                 stop_event = threading.Event()
                                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Processes resumed"))
                                 spinner_thread.start()
@@ -431,8 +334,10 @@ def check_cash_profiles(data: Dict):
                             try:
                                 with open(config_path, "w", encoding="utf-8") as f:
                                     json.dump(config, f, indent=4, ensure_ascii=False)
+                                logging.info("Config updated successfully")
                                 print(f"{Fore.GREEN}✓ Config updated successfully!{Style.RESET_ALL}")
                             except Exception as e:
+                                logging.error(f"Error writing config.json: {e}")
                                 print(f"{Fore.RED}✗ Error writing config.json: {e}{Style.RESET_ALL}")
                             stop_event = threading.Event()
                             spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Config updated"))
@@ -441,22 +346,28 @@ def check_cash_profiles(data: Dict):
                             stop_event.set()
                             spinner_thread.join()
                         else:
+                            logging.warning("No changes made to config (empty inputs)")
                             print(f"{Fore.YELLOW}⚠ No changes made (empty inputs){Style.RESET_ALL}")
 
-                        kasa_path = os.path.join(selected_profile['path'], "checkbox_kasa.exe")
+                        kasa_path = os.path.normpath(os.path.join(selected_profile['path'], "checkbox_kasa.exe"))
                         if os.path.exists(kasa_path):
                             try:
+                                logging.info("Launching cash register...")
                                 print(f"{Fore.CYAN}🚀 Launching cash register...{Style.RESET_ALL}")
-                                cmd = f'start cmd /K "{kasa_path}"'
-                                subprocess.Popen(cmd, cwd=selected_profile['path'], shell=True)
+                                cmd = f'cmd /c start cmd /k ""{kasa_path}""'
+                                subprocess.Popen(cmd, cwd=os.path.normpath(os.path.abspath(selected_profile['path'])), shell=True)
+                                logging.info("Cash register launched successfully")
                                 print(f"{Fore.GREEN}✓ Cash register launched successfully!{Style.RESET_ALL}")
+                                reset_cache()  # Сбрасываем кэш после запуска кассы
+                                cache_valid = False
                                 stop_event = threading.Event()
                                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Cash register launched"))
                                 spinner_thread.start()
-                                time.sleep(10)
+                                time.sleep(2)
                                 stop_event.set()
                                 spinner_thread.join()
                             except Exception as e:
+                                logging.error(f"Failed to launch cash register: {e}")
                                 print(f"{Fore.RED}✗ Failed to launch cash register: {e}{Style.RESET_ALL}")
                                 stop_event = threading.Event()
                                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Launch error"))
@@ -465,18 +376,21 @@ def check_cash_profiles(data: Dict):
                                 stop_event.set()
                                 spinner_thread.join()
                         else:
+                            logging.warning(f"checkbox_kasa.exe not found at {kasa_path}")
                             print(f"{Fore.YELLOW}⚠ checkbox_kasa.exe not found{Style.RESET_ALL}")
 
                         if manager_suspended and manager_processes:
+                            logging.info("Resuming manager processes...")
                             print(f"{Fore.YELLOW}▶ Resuming manager processes...{Style.RESET_ALL}")
                             for proc in manager_processes:
                                 try:
                                     proc.resume()
+                                    logging.info(f"Resumed kasa_manager.exe (PID: {proc.pid})")
                                     print(f"{Fore.GREEN}✓ Resumed kasa_manager.exe (PID: {proc.pid}){Style.RESET_ALL}")
                                 except psutil.NoSuchProcess:
-                                    pass
-                                except Exception:
-                                    pass
+                                    logging.warning(f"Process {proc.pid} already terminated")
+                                except Exception as e:
+                                    logging.error(f"Failed to resume process {proc.pid}: {e}")
                             stop_event = threading.Event()
                             spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Processes resumed"))
                             spinner_thread.start()
@@ -484,6 +398,7 @@ def check_cash_profiles(data: Dict):
                             stop_event.set()
                             spinner_thread.join()
                     else:
+                        logging.error(f"Invalid profile number: {profile_num}")
                         print(f"{Fore.RED}✗ Invalid profile number!{Style.RESET_ALL}")
                         stop_event = threading.Event()
                         spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid choice"))
@@ -492,6 +407,7 @@ def check_cash_profiles(data: Dict):
                         stop_event.set()
                         spinner_thread.join()
                 except ValueError:
+                    logging.error(f"Invalid format for choice: {choice}")
                     print(f"{Fore.RED}✗ Invalid format! Use C<number> (e.g., C1){Style.RESET_ALL}")
                     stop_event = threading.Event()
                     spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid input"))
@@ -506,10 +422,12 @@ def check_cash_profiles(data: Dict):
                     profile_num = int(choice[1:])
                     if 1 <= profile_num <= len(profiles_info):
                         selected_profile = profiles_info[profile_num - 1]
+                        logging.info(f"Refreshing shift for {selected_profile['name']}")
                         print(f"{Fore.CYAN}🔄 Refreshing shift for {selected_profile['name']}...{Style.RESET_ALL}")
 
-                        config_path = os.path.join(selected_profile['path'], "config.json")
+                        config_path = os.path.normpath(os.path.join(selected_profile['path'], "config.json"))
                         if not os.path.exists(config_path):
+                            logging.error(f"config.json not found at {config_path}")
                             print(f"{Fore.RED}✗ config.json not found!{Style.RESET_ALL}")
                             stop_event = threading.Event()
                             spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Config error"))
@@ -525,7 +443,18 @@ def check_cash_profiles(data: Dict):
                             web_server = config.get("web_server", {})
                             host = web_server.get("host", "127.0.0.1")
                             port = web_server.get("port", 9200)
+                        except json.JSONDecodeError as e:
+                            logging.error(f"Failed to parse config.json: {e}")
+                            print(f"{Fore.RED}✗ Error reading config.json: {e}{Style.RESET_ALL}")
+                            stop_event = threading.Event()
+                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Config error"))
+                            spinner_thread.start()
+                            time.sleep(2)
+                            stop_event.set()
+                            spinner_thread.join()
+                            continue
                         except Exception as e:
+                            logging.error(f"Unexpected error reading config.json: {e}")
                             print(f"{Fore.RED}✗ Error reading config.json: {e}{Style.RESET_ALL}")
                             stop_event = threading.Event()
                             spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Config error"))
@@ -539,8 +468,12 @@ def check_cash_profiles(data: Dict):
                         try:
                             response = requests.post(url, timeout=5)
                             response.raise_for_status()
+                            logging.info("Shift refreshed successfully")
                             print(f"{Fore.GREEN}✓ Shift refreshed successfully!{Style.RESET_ALL}")
+                            reset_cache()  # Сбрасываем кэш после обновления смены
+                            cache_valid = False
                         except requests.RequestException as e:
+                            logging.error(f"Failed to refresh shift: {e}")
                             print(f"{Fore.RED}✗ Failed to refresh shift: {e}{Style.RESET_ALL}")
 
                         stop_event = threading.Event()
@@ -550,6 +483,7 @@ def check_cash_profiles(data: Dict):
                         stop_event.set()
                         spinner_thread.join()
                     else:
+                        logging.error(f"Invalid profile number: {profile_num}")
                         print(f"{Fore.RED}✗ Invalid profile number!{Style.RESET_ALL}")
                         stop_event = threading.Event()
                         spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid choice"))
@@ -558,6 +492,7 @@ def check_cash_profiles(data: Dict):
                         stop_event.set()
                         spinner_thread.join()
                 except ValueError:
+                    logging.error(f"Invalid format for choice: {choice}")
                     print(f"{Fore.RED}✗ Invalid format! Use R<number> (e.g., R1){Style.RESET_ALL}")
                     stop_event = threading.Event()
                     spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid input"))
@@ -571,12 +506,14 @@ def check_cash_profiles(data: Dict):
                 choice_int = int(choice)
                 if 1 <= choice_int <= len(profiles_info):
                     selected_profile = profiles_info[choice_int - 1]
+                    logging.info(f"Launching profile {selected_profile['name']}")
                     print(f"{Fore.CYAN}Launching profile {selected_profile['name']}...{Style.RESET_ALL}")
 
                     kasa_process = find_process_by_path("checkbox_kasa.exe", selected_profile['path'])
                     if kasa_process:
                         try:
                             kasa_process.kill()
+                            logging.info(f"Stopped checkbox_kasa.exe (PID: {kasa_process.pid})")
                             print(f"{Fore.GREEN}✓ Stopped checkbox_kasa.exe (PID: {kasa_process.pid}){Style.RESET_ALL}")
                             stop_event = threading.Event()
                             spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process stopped"))
@@ -585,21 +522,24 @@ def check_cash_profiles(data: Dict):
                             stop_event.set()
                             spinner_thread.join()
                         except psutil.NoSuchProcess:
-                            pass
+                            logging.warning("Process already terminated")
                         except Exception as e:
+                            logging.error(f"Failed to stop process: {e}")
                             print(f"{Fore.RED}✗ Failed to stop process: {e}{Style.RESET_ALL}")
 
                     manager_processes = find_all_processes_by_name("kasa_manager.exe")
                     if manager_processes:
+                        logging.info("Suspending manager processes...")
                         print(f"{Fore.YELLOW}⏸ Suspending manager processes...{Style.RESET_ALL}")
                         for proc in manager_processes:
                             try:
                                 proc.suspend()
+                                logging.info(f"Suspended kasa_manager.exe (PID: {proc.pid})")
                                 print(f"{Fore.GREEN}✓ Suspended kasa_manager.exe (PID: {proc.pid}){Style.RESET_ALL}")
                             except psutil.NoSuchProcess:
-                                pass
-                            except Exception:
-                                pass
+                                logging.warning(f"Process {proc.pid} already terminated")
+                            except Exception as e:
+                                logging.error(f"Failed to suspend process {proc.pid}: {e}")
                         stop_event = threading.Event()
                         spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Processes suspended"))
                         spinner_thread.start()
@@ -607,13 +547,17 @@ def check_cash_profiles(data: Dict):
                         stop_event.set()
                         spinner_thread.join()
 
-                    kasa_path = os.path.join(selected_profile['path'], "checkbox_kasa.exe")
+                    kasa_path = os.path.normpath(os.path.join(selected_profile['path'], "checkbox_kasa.exe"))
                     if os.path.exists(kasa_path):
                         try:
+                            logging.info("Launching cash register...")
                             print(f"{Fore.CYAN}🚀 Launching cash register...{Style.RESET_ALL}")
-                            cmd = f'start cmd /K "{kasa_path}"'
-                            subprocess.Popen(cmd, cwd=selected_profile['path'], shell=True)
+                            cmd = f'cmd /c start cmd /k ""{kasa_path}""'
+                            subprocess.Popen(cmd, cwd=os.path.normpath(os.path.abspath(selected_profile['path'])), shell=True)
+                            logging.info("Cash register launched successfully")
                             print(f"{Fore.GREEN}✓ Cash register launched successfully!{Style.RESET_ALL}")
+                            reset_cache()  # Сбрасываем кэш после запуска кассы
+                            cache_valid = False
                             stop_event = threading.Event()
                             spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Cash register launched"))
                             spinner_thread.start()
@@ -621,20 +565,24 @@ def check_cash_profiles(data: Dict):
                             stop_event.set()
                             spinner_thread.join()
                         except Exception as e:
+                            logging.error(f"Failed to launch cash register: {e}")
                             print(f"{Fore.RED}✗ Failed to launch cash register: {e}{Style.RESET_ALL}")
                     else:
+                        logging.warning(f"checkbox_kasa.exe not found at {kasa_path}")
                         print(f"{Fore.YELLOW}⚠ checkbox_kasa.exe not found{Style.RESET_ALL}")
 
                     if manager_processes:
+                        logging.info("Resuming manager processes...")
                         print(f"{Fore.YELLOW}▶ Resuming manager processes...{Style.RESET_ALL}")
                         for proc in manager_processes:
                             try:
                                 proc.resume()
+                                logging.info(f"Resumed kasa_manager.exe (PID: {proc.pid})")
                                 print(f"{Fore.GREEN}✓ Resumed kasa_manager.exe (PID: {proc.pid}){Style.RESET_ALL}")
                             except psutil.NoSuchProcess:
-                                pass
-                            except Exception:
-                                pass
+                                logging.warning(f"Process {proc.pid} already terminated")
+                            except Exception as e:
+                                logging.error(f"Failed to resume process {proc.pid}: {e}")
                         stop_event = threading.Event()
                         spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Processes resumed"))
                         spinner_thread.start()
@@ -642,6 +590,7 @@ def check_cash_profiles(data: Dict):
                         stop_event.set()
                         spinner_thread.join()
                 else:
+                    logging.error(f"Invalid choice: {choice}")
                     print(f"{Fore.RED}✗ Invalid choice!{Style.RESET_ALL}")
                     stop_event = threading.Event()
                     spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid choice"))
@@ -650,6 +599,7 @@ def check_cash_profiles(data: Dict):
                     stop_event.set()
                     spinner_thread.join()
             except ValueError:
+                logging.error(f"Invalid input: {choice}")
                 print(f"{Fore.RED}✗ Invalid input!{Style.RESET_ALL}")
                 stop_event = threading.Event()
                 spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid input"))
@@ -659,9 +609,14 @@ def check_cash_profiles(data: Dict):
                 spinner_thread.join()
 
         except Exception as e:
+            logging.error(f"Unexpected error: {e}")
             print(f"{Fore.RED}✗ Unexpected error: {e}{Style.RESET_ALL}")
             if 'stop_event' in locals():
                 stop_event.set()
                 spinner_thread.join()
             input(f"{Fore.CYAN}Press Enter to continue...{Style.RESET_ALL}")
             return
+
+if __name__ == "__main__":
+    data = {}
+    check_cash_profiles(data)
