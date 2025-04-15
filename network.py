@@ -3,6 +3,7 @@ import os
 import threading
 import requests
 import time
+import hashlib
 from typing import Dict, Optional, Tuple
 from tqdm import tqdm
 from ping3 import ping
@@ -10,7 +11,19 @@ from colorama import Fore, Style
 from utils import show_spinner
 from config import VPS_VERSION_URL
 
-def check_for_updates() -> Tuple[bool, str]:
+def calculate_file_hash(filepath: str) -> str:
+    """Вычисление SHA256 хэша файла."""
+    sha256_hash = hashlib.sha256()
+    try:
+        with open(filepath, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        return sha256_hash.hexdigest().lower()
+    except Exception as e:
+        print(f"{Fore.RED}✗ Error calculating hash for {filepath}: {e}{Style.RESET_ALL}")
+        return ""
+
+def check_for_updates() -> Tuple[bool, str, str]:
     print(f"{Fore.CYAN}🔍 Checking for updates...{Style.RESET_ALL}")
     try:
         response = requests.get(VPS_VERSION_URL, timeout=5)
@@ -18,19 +31,20 @@ def check_for_updates() -> Tuple[bool, str]:
         data = response.json()
         latest_version = data.get("version")
         download_url = data.get("download_url", "")
+        sha256 = data.get("sha256", "")  # Получаем хэш из ответа
         from config import PROGRAM_VERSION
         if latest_version and latest_version != PROGRAM_VERSION:
             print(f"{Fore.GREEN}✓ New version {latest_version} available!{Style.RESET_ALL}")
-            return True, download_url
+            return True, download_url, sha256
         else:
             print(f"{Fore.GREEN}✓ You are using the latest version.{Style.RESET_ALL}")
-            return False, ""
+            return False, "", ""
     except requests.RequestException:
         print(f"{Fore.RED}✗ Failed to check for updates.{Style.RESET_ALL}")
-        return False, ""
+        return False, "", ""
     except Exception as e:
         print(f"{Fore.RED}✗ Update check error: {e}{Style.RESET_ALL}")
-        return False, ""
+        return False, "", ""
 
 def check_server_status(url: str) -> bool:
     try:
@@ -84,12 +98,22 @@ def fetch_json(url: str) -> Optional[Dict]:
         spinner_thread.join()
         return None
 
-def download_file(url: str, filename: str) -> bool:
+def download_file(url: str, filename: str, expected_sha256: str = "") -> bool:
     print(f"{Fore.CYAN}📥 Preparing to download {filename}...{Style.RESET_ALL}")
     try:
         if os.path.exists(filename):
-            print(f"{Fore.YELLOW}⚠ {filename} already exists, skipping download.{Style.RESET_ALL}")
-            return True
+            print(f"{Fore.YELLOW}⚠ {filename} already exists, checking hash...{Style.RESET_ALL}")
+            if expected_sha256:
+                computed_hash = calculate_file_hash(filename)
+                if computed_hash == expected_sha256:
+                    print(f"{Fore.GREEN}✓ Hash matches: {filename} is valid.{Style.RESET_ALL}")
+                    return True
+                else:
+                    print(f"{Fore.RED}✗ Hash mismatch: {filename} is corrupted. Redownloading...{Style.RESET_ALL}")
+                    os.remove(filename)
+            else:
+                print(f"{Fore.YELLOW}⚠ No expected hash provided, skipping hash check.{Style.RESET_ALL}")
+                return True
 
         max_retries = 3
         retry_delay = 5
@@ -105,7 +129,21 @@ def download_file(url: str, filename: str) -> bool:
                                 f.write(chunk)
                                 pbar.update(len(chunk))
                 print(f"{Fore.GREEN}✓ Downloaded {filename} successfully!{Style.RESET_ALL}")
-                return True
+
+                # Проверка хэша после скачивания
+                if expected_sha256:
+                    computed_hash = calculate_file_hash(filename)
+                    if computed_hash == expected_sha256:
+                        print(f"{Fore.GREEN}✓ Hash matches: {filename} is valid.{Style.RESET_ALL}")
+                        return True
+                    else:
+                        print(f"{Fore.RED}✗ Hash mismatch: {filename} is corrupted.{Style.RESET_ALL}")
+                        os.remove(filename)
+                        return False
+                else:
+                    print(f"{Fore.YELLOW}⚠ No expected hash provided, skipping hash check.{Style.RESET_ALL}")
+                    return True
+
             except requests.RequestException as e:
                 if attempt < max_retries - 1:
                     print(f"{Fore.YELLOW}⚠ Download failed, retrying...{Style.RESET_ALL}")

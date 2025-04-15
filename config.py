@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 import os
 
-VPS_API_URL = "http://185.253.219.57:5000/api/versions"
-VPS_VERSION_URL = "http://185.253.219.57:5000/api/tool_version"
-VPS_LOGS_URL = "http://185.253.219.57:5000/api/logs"
-VPS_CONFIG_URL = "http://185.253.219.57:5000/api/config"
+VPS_API_URL = "https://zoltean.zapto.org/multitool/api/versions"
+VPS_VERSION_URL = "https://zoltean.zapto.org/multitool/api/tool_version"
+VPS_LOGS_URL = "https://zoltean.zapto.org/multitool/api/logs"
+VPS_CONFIG_URL = "https://zoltean.zapto.org/multitool/api/config"
 DRIVES = ["C:\\", "D:\\", "E:\\", "F:\\"]
-PROGRAM_VERSION = "0.1.1_beta"
+PROGRAM_VERSION = "0.1.2_beta"
 PROGRAM_TITLE = f"CBX Multi Tool {PROGRAM_VERSION}"
 
 os.system(f"title {PROGRAM_TITLE}")
