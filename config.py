@@ -6,7 +6,7 @@ VPS_VERSION_URL = "https://zoltean.zapto.org/multitool/api/tool_version"
 VPS_LOGS_URL = "https://zoltean.zapto.org/multitool/api/logs"
 VPS_CONFIG_URL = "https://zoltean.zapto.org/multitool/api/config"
 DRIVES = ["C:\\", "D:\\", "E:\\", "F:\\"]
-PROGRAM_VERSION = "0.1.1_beta"
+PROGRAM_VERSION = "0.1.2_beta"
 PROGRAM_TITLE = f"CBX Multi Tool {PROGRAM_VERSION}"
 
 os.system(f"title {PROGRAM_TITLE}")
