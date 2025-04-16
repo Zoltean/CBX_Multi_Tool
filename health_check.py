@@ -10,7 +10,7 @@ import psutil
 import requests
 from colorama import Fore, Style, init
 from config import DRIVES
-from utils import show_spinner, find_process_by_path, find_all_processes_by_name
+from utils import show_spinner, find_process_by_path, find_all_processes_by_name, launch_executable
 from cleanup import cleanup
 from search_utils import find_manager_by_exe, find_cash_registers_by_profiles_json, find_cash_registers_by_exe, get_cash_register_info, reset_cache
 
@@ -315,31 +315,9 @@ def check_cash_profiles(data: Dict):
                         else:
                             print(f"{Fore.YELLOW}⚠ No changes made (empty inputs){Style.RESET_ALL}")
 
-                        kasa_path = os.path.normpath(os.path.join(selected_profile['path'], "checkbox_kasa.exe"))
-                        if os.path.exists(kasa_path):
-                            try:
-                                print(f"{Fore.CYAN}🚀 Launching cash register...{Style.RESET_ALL}")
-                                cmd = f'cmd /c start cmd /k ""{kasa_path}""'
-                                subprocess.Popen(cmd, cwd=os.path.normpath(os.path.abspath(selected_profile['path'])), shell=True)
-                                print(f"{Fore.GREEN}✓ Cash register launched successfully!{Style.RESET_ALL}")
-                                reset_cache()
-                                cache_valid = False
-                                stop_event = threading.Event()
-                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Cash register launched"))
-                                spinner_thread.start()
-                                time.sleep(2)
-                                stop_event.set()
-                                spinner_thread.join()
-                            except Exception as e:
-                                print(f"{Fore.RED}✗ Failed to launch cash register: {e}{Style.RESET_ALL}")
-                                stop_event = threading.Event()
-                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Launch error"))
-                                spinner_thread.start()
-                                time.sleep(2)
-                                stop_event.set()
-                                spinner_thread.join()
-                        else:
-                            print(f"{Fore.YELLOW}⚠ checkbox_kasa.exe not found{Style.RESET_ALL}")
+                        if launch_executable("checkbox_kasa.exe", selected_profile['path'], "Cash register"):
+                            reset_cache()
+                            cache_valid = False
 
                         if manager_suspended and manager_processes:
                             print(f"{Fore.YELLOW}▶ Resuming manager processes...{Style.RESET_ALL}")

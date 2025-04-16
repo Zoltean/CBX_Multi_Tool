@@ -10,7 +10,7 @@ from tqdm import tqdm
 from colorama import Fore, Style
 import psutil
 from config import DRIVES
-from utils import find_process_by_path, find_all_processes_by_name, manage_processes, show_spinner
+from utils import find_process_by_path, find_all_processes_by_name, manage_processes, show_spinner, launch_executable
 from network import download_file
 from backup_restore import create_backup, restore_from_backup, delete_backup
 from search_utils import find_cash_registers_by_profiles_json, find_cash_registers_by_exe, get_cash_register_info, reset_cache
@@ -613,20 +613,7 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
         for target_dir in target_dirs:
             try:
                 if is_rro_agent:
-                    kasa_path = os.path.join(target_dir, "checkbox_kasa.exe")
-                    if os.path.exists(kasa_path):
-                        print(f"{Fore.CYAN}🚀 Launching cash register...{Style.RESET_ALL}")
-                        cmd = f'start cmd /K "{kasa_path}"'
-                        subprocess.Popen(cmd, cwd=target_dir, shell=True)
-                        print(f"{Fore.GREEN}✓ Cash register launched successfully!{Style.RESET_ALL}")
-                        stop_event = threading.Event()
-                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Cash register launched"))
-                        spinner_thread.start()
-                        time.sleep(10)
-                        stop_event.set()
-                        spinner_thread.join()
-                    else:
-                        print(f"{Fore.YELLOW}⚠ Cash register executable not found.{Style.RESET_ALL}")
+                    launch_executable("checkbox_kasa.exe", target_dir, "Cash register", spinner_duration=10.0)
 
                 elif is_paylink:
                     paylink_path = os.path.join(target_dir, "CheckboxPayLink.exe")
