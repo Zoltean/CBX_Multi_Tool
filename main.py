@@ -31,7 +31,7 @@ def main():
         else:
             print(f"{Fore.GREEN}✓ Admin privileges confirmed.{Style.RESET_ALL}")
 
-        update_available, download_url = check_for_updates()
+        update_available, download_url, sha256 = check_for_updates()
 
         data = fetch_json(VPS_API_URL)
 
@@ -56,29 +56,49 @@ def main():
             "patching": {
                 "legacy": {
                     "kasa_manager": [
-                        {"patch_name": item["patch_name"], "patch_url": item["patch_url"]}
+                        {
+                            "patch_name": item["patch_name"],
+                            "patch_url": item["patch_url"],
+                            "sha256": item.get("patch_sha256", "")
+                        }
                         for item in data["legacy"]["kasa_manager"]
                         if "patch_name" in item and "patch_url" in item
                     ],
                     "rro_agent": [
-                        {"patch_name": item["patch_name"], "patch_url": item["patch_url"]}
+                        {
+                            "patch_name": item["patch_name"],
+                            "patch_url": item["patch_url"],
+                            "sha256": item.get("patch_sha256", "")
+                        }
                         for item in data["legacy"]["rro_agent"]
                         if "patch_name" in item and "patch_url" in item
                     ]
                 },
                 "dev": {
                     "kasa_manager": [
-                        {"patch_name": item["patch_name"], "patch_url": item["patch_url"]}
+                        {
+                            "patch_name": item["patch_name"],
+                            "patch_url": item["patch_url"],
+                            "sha256": item.get("patch_sha256", "")
+                        }
                         for item in data["dev"]["kasa_manager"]
                         if "patch_name" in item and "patch_url" in item
                     ],
                     "rro_agent": [
-                        {"patch_name": item["patch_name"], "patch_url": item["patch_url"]}
+                        {
+                            "patch_name": item["patch_name"],
+                            "patch_url": item["patch_url"],
+                            "sha256": item.get("patch_sha256", "")
+                        }
                         for item in data["dev"]["rro_agent"]
                         if "patch_name" in item and "patch_url" in item
                     ],
                     "paylink": [
-                        {"patch_name": item["patch_name"], "patch_url": item["patch_url"]}
+                        {
+                            "patch_name": item["patch_name"],
+                            "patch_url": item["patch_url"],
+                            "sha256": item.get("patch_sha256", "")
+                        }
                         for item in data["dev"]["paylink"]
                         if "patch_name" in item and "patch_url" in item
                     ]
@@ -97,7 +117,7 @@ def main():
         }
 
         display_menu("Main Menu", menu_options, data,
-                     update_available=update_available, download_url=download_url)
+                     update_available=update_available, download_url=download_url, sha256=sha256)
 
         print(f"{Fore.GREEN}✓ Program completed successfully!{Style.RESET_ALL}")
     except Exception as e:

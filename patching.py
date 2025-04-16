@@ -6,6 +6,7 @@ import time
 import zipfile
 import threading
 import logging
+import hashlib
 from typing import Dict, Optional, List
 from tqdm import tqdm
 from colorama import Fore, Style
@@ -20,15 +21,32 @@ from search_utils import find_cash_registers_by_profiles_json, find_cash_registe
 # Настройка логирования
 #logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def install_file(file_data: Dict, paylink_patch_data: Optional[Dict] = None, data: Optional[Dict] = None) -> bool:
+def install_file(file_data: Dict, paylink_patch_data: Optional[Dict] = None, data: Optional[Dict] = None, expected_sha256: str = "") -> bool:
     filename = file_data["name"]
     url = file_data["url"]
     print(f"{Fore.CYAN}📥 Preparing to install {filename}...{Style.RESET_ALL}")
 
     try:
-        if not download_file(url, filename):
-            print(f"{Fore.RED}✗ Installation cancelled.{Style.RESET_ALL}")
-            return False
+        logging.debug(f"Installing file {filename} with expected SHA256: {expected_sha256}")
+        if not download_file(url, filename, expected_sha256=expected_sha256):
+            if expected_sha256:
+                print(f"{Fore.YELLOW}⚠ Hash verification failed for {filename}.{Style.RESET_ALL}")
+                choice = input(f"{Fore.CYAN}Continue with installation anyway? (Y/N): {Style.RESET_ALL}").strip().lower()
+                if choice != "y":
+                    print(f"{Fore.RED}✗ Installation cancelled.{Style.RESET_ALL}")
+                    return False
+                print(f"{Fore.YELLOW}⚠ Proceeding without hash verification.{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.RED}✗ Installation cancelled.{Style.RESET_ALL}")
+                return False
+
+        # Log actual hash
+        try:
+            with open(filename, "rb") as f:
+                actual_hash = hashlib.sha256(f.read()).hexdigest()
+                logging.debug(f"Actual SHA256 for {filename}: {actual_hash}")
+        except Exception as e:
+            logging.warning(f"Failed to compute actual hash for {filename}: {e}")
 
         print(f"{Fore.CYAN}🚀 Launching installer...{Style.RESET_ALL}")
         if not os.path.exists(filename):
@@ -61,7 +79,8 @@ def install_file(file_data: Dict, paylink_patch_data: Optional[Dict] = None, dat
                             latest_paylink_patch,
                             "Checkbox PayLink (Beta)",
                             data,
-                            is_paylink=True
+                            is_paylink=True,
+                            expected_sha256=latest_paylink_patch.get("sha256", "")
                         )
                         if patch_success:
                             print(f"{Fore.GREEN}✓ PayLink updated successfully!{Style.RESET_ALL}")
@@ -128,15 +147,34 @@ def extract_to_multiple_dirs(zip_ref: zipfile.ZipFile, target_dirs: List[str], t
         raise
 
 def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: bool = False,
-               is_paylink: bool = False) -> bool:
+               is_paylink: bool = False, expected_sha256: str = "") -> bool:
     patch_file_name = patch_data["patch_name"]
     patch_url = patch_data["patch_url"]
     print(f"{Fore.CYAN}📥 Preparing to apply {patch_file_name}...{Style.RESET_ALL}")
 
     try:
-        if not download_file(patch_url, patch_file_name):
-            print(f"{Fore.RED}✗ Update cancelled.{Style.RESET_ALL}")
-            return False
+        # Log expected hash
+        logging.debug(f"Expected SHA256 for {patch_file_name}: {expected_sha256}")
+
+        # Download file with hash verification
+        if not download_file(patch_url, patch_file_name, expected_sha256=expected_sha256):
+            if expected_sha256:
+                print(f"{Fore.YELLOW}⚠ Hash verification failed for {patch_file_name}.{Style.RESET_ALL}")
+                choice = input(f"{Fore.CYAN}Continue with update anyway? (Y/N): {Style.RESET_ALL}").strip().lower()
+                if choice != "y":
+                    print(f"{Fore.RED}✗ Update cancelled.{Style.RESET_ALL}")
+                    return False
+                print(f"{Fore.YELLOW}⚠ Proceeding without hash verification.{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.YELLOW}⚠ No hash provided for {patch_file_name}. Proceeding without verification.{Style.RESET_ALL}")
+
+        # Log actual hash
+        try:
+            with open(patch_file_name, "rb") as f:
+                actual_hash = hashlib.sha256(f.read()).hexdigest()
+                logging.debug(f"Actual SHA256 for {patch_file_name}: {actual_hash}")
+        except Exception as e:
+            logging.warning(f"Failed to compute actual hash for {patch_file_name}: {e}")
 
         target_folder = "checkbox.kasa.manager" if is_rro_agent else (
             "Checkbox PayLink (Beta)" if is_paylink else "checkbox.kasa.manager")

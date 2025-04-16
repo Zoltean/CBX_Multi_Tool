@@ -24,7 +24,7 @@ if sys.stderr.encoding != 'utf-8':
     sys.stderr = open(sys.stderr.fileno(), mode='w', encoding='utf-8', buffering=1)
 
 def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Dict] = None,
-                 update_available: bool = False, download_url: str = ""):
+                 update_available: bool = False, download_url: str = "", sha256: str = ""):
     while True:
         try:
             os.system("cls")
@@ -194,15 +194,17 @@ def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Di
                 continue
 
             if title.lower() == "main menu" and choice.lower() in ["u", "г"] and update_available:
-                print(f"{Fore.CYAN}Opening download page...{Style.RESET_ALL}")
-                try:
-                    import webbrowser
-                    webbrowser.open(download_url)
-                    print(f"{Fore.GREEN}✓ Download page opened successfully!{Style.RESET_ALL}")
-                except Exception as e:
-                    print(f"{Fore.RED}✗ Failed to open browser: {e}{Style.RESET_ALL}")
+                print(f"{Fore.CYAN}Downloading update...{Style.RESET_ALL}")
+                from network import download_file
+                filename = os.path.basename(download_url)
+                if not sha256:
+                    print(f"{Fore.YELLOW}⚠ Warning: No SHA256 hash provided by API. Download will proceed without hash verification.{Style.RESET_ALL}")
+                if download_file(download_url, filename, expected_sha256=sha256):
+                    print(f"{Fore.GREEN}✓ Update downloaded and verified successfully!{Style.RESET_ALL}")
+                else:
+                    print(f"{Fore.RED}✗ Failed to download or verify update.{Style.RESET_ALL}")
                 stop_event = threading.Event()
-                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Opening browser"))
+                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update processed"))
                 spinner_thread.start()
                 time.sleep(2)
                 stop_event.set()
@@ -221,13 +223,14 @@ def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Di
                         paylink_patch_data = None
                         if "paylink" in key.lower() and "dev" in title.lower():
                             paylink_patch_data = data["dev"]["paylink"][-1]
-                        install_file(value, paylink_patch_data, data)
+                        install_file(value, paylink_patch_data, data, expected_sha256=value.get("sha256", ""))
                     elif "patch_url" in value:
                         is_rro_agent = "rro_agent" in key.lower() and "tools" not in key.lower()
                         is_paylink = "paylink" in key.lower()
-                        patch_file(value, "checkbox.kasa.manager" if not (is_rro_agent or is_paylink) else "Checkbox PayLink (Beta)" if is_paylink else "checkbox.kasa.manager", data, is_rro_agent, is_paylink)
+                        patch_file(value, "checkbox.kasa.manager" if not (is_rro_agent or is_paylink) else "Checkbox PayLink (Beta)" if is_paylink else "checkbox.kasa.manager", data, is_rro_agent, is_paylink, expected_sha256=value.get("sha256", ""))
                     else:
-                        display_menu(key.capitalize(), value, data, parent_menu={"title": title, "options": options}, update_available=update_available, download_url=download_url)
+                        display_menu(key.capitalize(), value, data, parent_menu={"title": title, "options": options},
+                                     update_available=update_available, download_url=download_url, sha256=sha256)
                 else:
                     print(f"{Fore.RED}✗ Invalid option!{Style.RESET_ALL}")
                     stop_event = threading.Event()

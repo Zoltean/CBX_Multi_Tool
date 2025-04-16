@@ -98,7 +98,7 @@ def setup_logging():
 
     iteration_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     config = fetch_config()
-    LOG_TO_FILE = config["LOG_TO_FILE"]
+    LOG_TO_FILE = True #config["LOG_TO_FILE"]
     SEND_LOGS_TO_API = config["SEND_LOGS_TO_API"]
 
     system_info = []
