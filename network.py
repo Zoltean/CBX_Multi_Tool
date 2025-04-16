@@ -1,14 +1,12 @@
 # -*- coding: utf-8 -*-
 import os
-import threading
 import requests
-import time
 import hashlib
 from typing import Dict, Optional, Tuple
 from tqdm import tqdm
 from ping3 import ping
 from colorama import Fore, Style
-from utils import show_spinner
+from utils import run_spinner
 from config import VPS_VERSION_URL
 
 def calculate_file_hash(filepath: str) -> str:
@@ -31,19 +29,23 @@ def check_for_updates() -> Tuple[bool, str, str]:
         data = response.json()
         latest_version = data.get("version")
         download_url = data.get("download_url", "")
-        sha256 = data.get("sha256", "")  # Получаем хэш из ответа
+        sha256 = data.get("sha256", "")
         from config import PROGRAM_VERSION
         if latest_version and latest_version != PROGRAM_VERSION:
             print(f"{Fore.GREEN}✓ New version {latest_version} available!{Style.RESET_ALL}")
+            run_spinner("Update check completed", 1.0)
             return True, download_url, sha256
         else:
             print(f"{Fore.GREEN}✓ You are using the latest version.{Style.RESET_ALL}")
+            run_spinner("Update check completed", 1.0)
             return False, "", ""
     except requests.RequestException:
         print(f"{Fore.RED}✗ Failed to check for updates.{Style.RESET_ALL}")
+        run_spinner("Update check failed", 2.0)
         return False, "", ""
     except Exception as e:
         print(f"{Fore.RED}✗ Update check error: {e}{Style.RESET_ALL}")
+        run_spinner("Update check error", 2.0)
         return False, "", ""
 
 def check_server_status(url: str) -> bool:
@@ -52,12 +54,15 @@ def check_server_status(url: str) -> bool:
         result = ping(domain, timeout=5)
         if result is not None and result is not False:
             print(f"{Fore.GREEN}✓ Server is online.{Style.RESET_ALL}")
+            run_spinner("Server check completed", 1.0)
             return True
         else:
             print(f"{Fore.RED}✗ Server is offline.{Style.RESET_ALL}")
+            run_spinner("Server check failed", 2.0)
             return False
     except Exception:
         print(f"{Fore.RED}✗ Failed to ping server.{Style.RESET_ALL}")
+        run_spinner("Server ping failed", 2.0)
         return False
 
 def fetch_json(url: str) -> Optional[Dict]:
@@ -69,33 +74,19 @@ def fetch_json(url: str) -> Optional[Dict]:
             data = response.json()
             if "error" in data:
                 print(f"{Fore.RED}✗ Server error: {data['error']}{Style.RESET_ALL}")
-                stop_event = threading.Event()
-                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Server error"))
-                spinner_thread.start()
-                time.sleep(2)
-                stop_event.set()
-                spinner_thread.join()
+                run_spinner("Server error", 2.0)
                 return None
             pbar.update(100)
             print(f"{Fore.GREEN}✓ Data retrieved successfully!{Style.RESET_ALL}")
+            run_spinner("Data fetch completed", 1.0)
             return data
     except requests.RequestException as e:
         print(f"{Fore.RED}✗ Failed to connect: {e}{Style.RESET_ALL}")
-        stop_event = threading.Event()
-        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Connection failed"))
-        spinner_thread.start()
-        time.sleep(2)
-        stop_event.set()
-        spinner_thread.join()
+        run_spinner("Connection failed", 2.0)
         return None
     except Exception as e:
         print(f"{Fore.RED}✗ Data fetch error: {e}{Style.RESET_ALL}")
-        stop_event = threading.Event()
-        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Fetch error"))
-        spinner_thread.start()
-        time.sleep(2)
-        stop_event.set()
-        spinner_thread.join()
+        run_spinner("Fetch error", 2.0)
         return None
 
 def download_file(url: str, filename: str, expected_sha256: str = "") -> bool:
@@ -107,12 +98,14 @@ def download_file(url: str, filename: str, expected_sha256: str = "") -> bool:
                 computed_hash = calculate_file_hash(filename)
                 if computed_hash == expected_sha256:
                     print(f"{Fore.GREEN}✓ Hash matches: {filename} is valid.{Style.RESET_ALL}")
+                    run_spinner("Hash check completed", 1.0)
                     return True
                 else:
                     print(f"{Fore.RED}✗ Hash mismatch: {filename} is corrupted. Redownloading...{Style.RESET_ALL}")
                     os.remove(filename)
             else:
                 print(f"{Fore.YELLOW}⚠ No expected hash provided, skipping hash check.{Style.RESET_ALL}")
+                run_spinner("Hash check skipped", 1.0)
                 return True
 
         max_retries = 3
@@ -130,46 +123,33 @@ def download_file(url: str, filename: str, expected_sha256: str = "") -> bool:
                                 pbar.update(len(chunk))
                 print(f"{Fore.GREEN}✓ Downloaded {filename} successfully!{Style.RESET_ALL}")
 
-                # Проверка хэша после скачивания
                 if expected_sha256:
                     computed_hash = calculate_file_hash(filename)
                     if computed_hash == expected_sha256:
                         print(f"{Fore.GREEN}✓ Hash matches: {filename} is valid.{Style.RESET_ALL}")
+                        run_spinner("Download completed", 1.0)
                         return True
                     else:
                         print(f"{Fore.RED}✗ Hash mismatch: {filename} is corrupted.{Style.RESET_ALL}")
                         os.remove(filename)
+                        run_spinner("Hash mismatch", 2.0)
                         return False
                 else:
                     print(f"{Fore.YELLOW}⚠ No expected hash provided, skipping hash check.{Style.RESET_ALL}")
+                    run_spinner("Download completed", 1.0)
                     return True
 
             except requests.RequestException as e:
                 if attempt < max_retries - 1:
                     print(f"{Fore.YELLOW}⚠ Download failed, retrying...{Style.RESET_ALL}")
-                    stop_event = threading.Event()
-                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Retrying download"))
-                    spinner_thread.start()
-                    time.sleep(retry_delay)
-                    stop_event.set()
-                    spinner_thread.join()
+                    run_spinner("Retrying download", retry_delay)
                 else:
                     print(f"{Fore.RED}✗ Download failed after {max_retries} attempts.{Style.RESET_ALL}")
-                    stop_event = threading.Event()
-                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Download failed"))
-                    spinner_thread.start()
-                    time.sleep(2)
-                    stop_event.set()
-                    spinner_thread.join()
+                    run_spinner("Download failed", 2.0)
                     return False
     except Exception as e:
         print(f"{Fore.RED}✗ Download error: {e}{Style.RESET_ALL}")
-        stop_event = threading.Event()
-        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Download error"))
-        spinner_thread.start()
-        time.sleep(2)
-        stop_event.set()
-        spinner_thread.join()
+        run_spinner("Download error", 2.0)
         return False
 
 def refresh_shift():
@@ -188,55 +168,25 @@ def refresh_shift():
             data = response.json()
             if data.get("status") == True:
                 print(f"{Fore.GREEN}✓ Shift refreshed successfully on port {port}!{Style.RESET_ALL}")
-                stop_event = threading.Event()
-                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Shift refreshed"))
-                spinner_thread.start()
-                time.sleep(1)
-                stop_event.set()
-                spinner_thread.join()
+                run_spinner("Shift refreshed", 1.0)
                 return True
             else:
                 print(f"{Fore.RED}✗ Failed to refresh shift: unexpected response.{Style.RESET_ALL}")
-                stop_event = threading.Event()
-                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Shift failed"))
-                spinner_thread.start()
-                time.sleep(2)
-                stop_event.set()
-                spinner_thread.join()
+                run_spinner("Shift failed", 2.0)
                 return False
         else:
             print(f"{Fore.RED}✗ Failed to refresh shift: error {response.status_code}.{Style.RESET_ALL}")
-            stop_event = threading.Event()
-            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Shift failed"))
-            spinner_thread.start()
-            time.sleep(2)
-            stop_event.set()
-            spinner_thread.join()
+            run_spinner("Shift failed", 2.0)
             return False
     except ValueError as e:
         print(f"{Fore.RED}✗ Invalid port: {e}{Style.RESET_ALL}")
-        stop_event = threading.Event()
-        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid port"))
-        spinner_thread.start()
-        time.sleep(2)
-        stop_event.set()
-        spinner_thread.join()
+        run_spinner("Invalid port", 2.0)
         return False
     except requests.RequestException as e:
         print(f"{Fore.RED}✗ Failed to connect: {e}{Style.RESET_ALL}")
-        stop_event = threading.Event()
-        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Connection failed"))
-        spinner_thread.start()
-        time.sleep(2)
-        stop_event.set()
-        spinner_thread.join()
+        run_spinner("Connection failed", 2.0)
         return False
     except Exception as e:
         print(f"{Fore.RED}✗ Shift refresh error: {e}{Style.RESET_ALL}")
-        stop_event = threading.Event()
-        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Refresh error"))
-        spinner_thread.start()
-        time.sleep(2)
-        stop_event.set()
-        spinner_thread.join()
+        run_spinner("Refresh error", 2.0)
         return False

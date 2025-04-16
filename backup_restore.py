@@ -1,10 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
-import subprocess
-import time
 import zipfile
 import shutil
-import threading
 from datetime import datetime
 from typing import Optional
 
@@ -12,24 +9,9 @@ import psutil
 from tqdm import tqdm
 from colorama import Fore, Style
 
-from utils import find_process_by_path, find_all_processes_by_name, launch_executable, show_spinner
+from utils import find_process_by_path, find_all_processes_by_name, launch_executable, manage_process_lifecycle, \
+    run_spinner
 
-def terminate_process_with_confirmation(proc: psutil.Process, process_name: str) -> bool:
-    confirm = input(f"{Fore.CYAN}Terminate {process_name} (PID: {proc.pid})? (Y/N): {Style.RESET_ALL}").strip().lower()
-    if confirm == "y":
-        try:
-            proc.terminate()
-            proc.wait(timeout=5)
-            print(f"{Fore.GREEN}✓ Stopped {process_name} (PID: {proc.pid}).{Style.RESET_ALL}")
-            return True
-        except psutil.TimeoutExpired:
-            proc.terminate()
-            print(f"{Fore.GREEN}✓ Force stopped {process_name} (PID: {proc.pid}).{Style.RESET_ALL}")
-            return True
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            print(f"{Fore.RED}✗ Failed to stop {process_name} (PID: {proc.pid}).{Style.RESET_ALL}")
-            return False
-    return False
 
 def create_backup(target_dir: str) -> Optional[str]:
     print(f"{Fore.CYAN}📦 Creating backup for {os.path.basename(target_dir)}...{Style.RESET_ALL}")
@@ -48,44 +30,26 @@ def create_backup(target_dir: str) -> Optional[str]:
                         zipf.write(file_path, arcname)
                         pbar.update(1)
         print(f"{Fore.GREEN}✓ Backup created: {backup_name}{Style.RESET_ALL}")
-        stop_event = threading.Event()
-        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Backup created"))
-        spinner_thread.start()
-        time.sleep(1)
-        stop_event.set()
-        spinner_thread.join()
+        run_spinner("Backup created", 1.0)
         return backup_path
     except Exception as e:
         print(f"{Fore.RED}✗ Failed to create backup: {e}{Style.RESET_ALL}")
-        stop_event = threading.Event()
-        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Backup failed"))
-        spinner_thread.start()
-        time.sleep(2)
-        stop_event.set()
-        spinner_thread.join()
+        run_spinner("Backup failed", 2.0)
         return None
+
 
 def delete_backup(backup_path: str) -> bool:
     print(f"{Fore.CYAN}🗑 Deleting backup {os.path.basename(backup_path)}...{Style.RESET_ALL}")
     try:
         os.remove(backup_path)
         print(f"{Fore.GREEN}✓ Backup deleted successfully!{Style.RESET_ALL}")
-        stop_event = threading.Event()
-        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Backup deleted"))
-        spinner_thread.start()
-        time.sleep(1)
-        stop_event.set()
-        spinner_thread.join()
+        run_spinner("Backup deleted", 1.0)
         return True
     except Exception as e:
         print(f"{Fore.RED}✗ Failed to delete backup: {e}{Style.RESET_ALL}")
-        stop_event = threading.Event()
-        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Delete failed"))
-        spinner_thread.start()
-        time.sleep(2)
-        stop_event.set()
-        spinner_thread.join()
+        run_spinner("Delete failed", 2.0)
         return False
+
 
 def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = False,
                         is_paylink: bool = False) -> bool:
@@ -94,66 +58,24 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
     processes_to_check = ["checkbox_kasa.exe"] if is_rro_agent else (
         ["CheckboxPayLink.exe", "POSServer.exe"] if is_paylink else ["kasa_manager.exe"])
 
-    running_processes = []
-    try:
-        for proc_name in processes_to_check:
-            process = find_process_by_path(proc_name, target_dir)
-            if process:
-                running_processes.append(process)
-    except Exception:
-        pass
+    if not manage_process_lifecycle(processes_to_check, [target_dir], action="terminate",
+                                    prompt=True, spinner_message="Processes terminated", spinner_duration=2.0):
+        print(f"{Fore.RED}✗ Restoration cancelled due to process termination failure.{Style.RESET_ALL}")
+        run_spinner("Restore cancelled", 2.0)
+        return False
 
     manager_processes = []
     manager_running = False
-    cash_running = bool(running_processes)
     if is_rro_agent:
         try:
             manager_processes = find_all_processes_by_name("kasa_manager.exe")
             manager_running = bool(manager_processes)
+            if manager_running:
+                print(f"{Fore.YELLOW}Pausing manager processes...{Style.RESET_ALL}")
+                manage_process_lifecycle(["kasa_manager.exe"], [target_dir], action="suspend",
+                                         prompt=False, spinner_message="Manager paused", spinner_duration=1.0)
         except Exception:
             pass
-
-    if running_processes:
-        print(f"{Fore.RED}⚠ Processes running in {target_dir}!{Style.RESET_ALL}")
-        for proc in running_processes:
-            print(f" - {proc.info['name']} (PID: {proc.pid})")
-        choice = input(f"{Fore.CYAN}Close all processes? (Y/N): {Style.RESET_ALL}").strip().lower()
-        if choice == "y":
-            print(f"{Fore.YELLOW}Stopping processes...{Style.RESET_ALL}")
-            for proc in running_processes:
-                if not terminate_process_with_confirmation(proc, proc.info['name']):
-                    print(f"{Fore.RED}✗ Restoration cancelled due to process termination failure.{Style.RESET_ALL}")
-                    stop_event = threading.Event()
-                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Restore cancelled"))
-                    spinner_thread.start()
-                    time.sleep(2)
-                    stop_event.set()
-                    spinner_thread.join()
-                    return False
-            # Immediately suspend manager processes to prevent cash restart
-            if is_rro_agent and manager_running:
-                print(f"{Fore.YELLOW}Pausing manager processes...{Style.RESET_ALL}")
-                for proc in manager_processes:
-                    try:
-                        proc.suspend()
-                        print(f"{Fore.GREEN}✓ Paused kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
-                    except psutil.NoSuchProcess:
-                        pass
-                    except Exception:
-                        print(f"{Fore.RED}✗ Failed to pause kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
-        else:
-            print(f"{Fore.RED}✗ Restoration cancelled.{Style.RESET_ALL}")
-            stop_event = threading.Event()
-            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Restore cancelled"))
-            spinner_thread.start()
-            time.sleep(2)
-            stop_event.set()
-            spinner_thread.join()
-            return False
-    elif is_rro_agent and manager_running:
-        print(f"{Fore.YELLOW}Cash register not running, manager running - proceeding...{Style.RESET_ALL}")
-    else:
-        print(f"{Fore.YELLOW}No relevant processes found, proceeding...{Style.RESET_ALL}")
 
     try:
         print(f"{Fore.YELLOW}Clearing {target_dir}...{Style.RESET_ALL}")
@@ -166,12 +88,7 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
         print(f"{Fore.GREEN}✓ Directory cleared.{Style.RESET_ALL}")
     except Exception as e:
         print(f"{Fore.RED}✗ Failed to clear directory: {e}{Style.RESET_ALL}")
-        stop_event = threading.Event()
-        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Clear failed"))
-        spinner_thread.start()
-        time.sleep(2)
-        stop_event.set()
-        spinner_thread.join()
+        run_spinner("Clear failed", 2.0)
         return False
 
     try:
@@ -185,57 +102,23 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
         print(f"{Fore.GREEN}✓ Restored successfully to {target_dir}!{Style.RESET_ALL}")
     except Exception as e:
         print(f"{Fore.RED}✗ Restore failed: {e}{Style.RESET_ALL}")
-        stop_event = threading.Event()
-        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Restore failed"))
-        spinner_thread.start()
-        time.sleep(2)
-        stop_event.set()
-        spinner_thread.join()
+        run_spinner("Restore failed", 2.0)
         return False
 
     try:
         if is_rro_agent:
             launch_executable("checkbox_kasa.exe", target_dir, "Cash register", spinner_duration=10.0)
         elif is_paylink:
-            paylink_path = os.path.join(target_dir, "CheckboxPayLink.exe")
-            if os.path.exists(paylink_path):
-                print(f"{Fore.CYAN}🚀 Launching PayLink...{Style.RESET_ALL}")
-                subprocess.Popen(f'start "" "{paylink_path}"', cwd=target_dir, shell=True)
-                print(f"{Fore.GREEN}✓ PayLink launched successfully!{Style.RESET_ALL}")
-            else:
-                print(f"{Fore.YELLOW}⚠ PayLink executable not found.{Style.RESET_ALL}")
+            launch_executable("CheckboxPayLink.exe", target_dir, "PayLink", spinner_duration=2.0)
         else:
-            manager_path = os.path.join(target_dir, "kasa_manager.exe")
-            if os.path.exists(manager_path):
-                print(f"{Fore.CYAN}🚀 Launching manager...{Style.RESET_ALL}")
-                subprocess.Popen(f'start "" "{manager_path}"', cwd=target_dir, shell=True)
-                print(f"{Fore.GREEN}✓ Manager launched successfully!{Style.RESET_ALL}")
-            else:
-                print(f"{Fore.YELLOW}⚠ Manager executable not found.{Style.RESET_ALL}")
+            launch_executable("kasa_manager.exe", target_dir, "Manager", spinner_duration=2.0)
     except Exception as e:
         print(f"{Fore.RED}✗ Failed to launch process: {e}{Style.RESET_ALL}")
 
-    if is_rro_agent and cash_running and manager_running and manager_processes:
+    if is_rro_agent and manager_running:
         print(f"{Fore.YELLOW}Resuming manager processes...{Style.RESET_ALL}")
-        for proc in manager_processes:
-            try:
-                proc.resume()
-                print(f"{Fore.GREEN}✓ Resumed kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
-                stop_event = threading.Event()
-                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process resumed"))
-                spinner_thread.start()
-                time.sleep(1)
-                stop_event.set()
-                spinner_thread.join()
-            except psutil.NoSuchProcess:
-                print(f"{Fore.YELLOW}⚠ kasa_manager.exe (PID: {proc.pid}) already terminated.{Style.RESET_ALL}")
-            except Exception as e:
-                print(f"{Fore.RED}✗ Failed to resume kasa_manager.exe: {e}{Style.RESET_ALL}")
+        manage_process_lifecycle(["kasa_manager.exe"], [target_dir], action="resume",
+                                 prompt=False, spinner_message="Manager resumed", spinner_duration=1.0)
 
-    stop_event = threading.Event()
-    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Restore completed"))
-    spinner_thread.start()
-    time.sleep(2)
-    stop_event.set()
-    spinner_thread.join()
+    run_spinner("Restore completed", 2.0)
     return True
