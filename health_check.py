@@ -17,6 +17,23 @@ from search_utils import find_manager_by_exe, find_cash_registers_by_profiles_js
 # Инициализация colorama
 init(autoreset=True)
 
+def terminate_process_with_confirmation(proc: psutil.Process, process_name: str) -> bool:
+    confirm = input(f"{Fore.CYAN}Terminate {process_name} (PID: {proc.pid})? (Y/N): {Style.RESET_ALL}").strip().lower()
+    if confirm == "y":
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+            print(f"{Fore.GREEN}✓ Stopped {process_name} (PID: {proc.pid}){Style.RESET_ALL}")
+            return True
+        except psutil.TimeoutExpired:
+            proc.terminate()
+            print(f"{Fore.GREEN}✓ Force stopped {process_name} (PID: {proc.pid}){Style.RESET_ALL}")
+            return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            print(f"{Fore.RED}✗ Failed to stop {process_name} (PID: {proc.pid}){Style.RESET_ALL}")
+            return False
+    return False
+
 def check_cash_profiles(data: Dict):
     cache_valid = False
     while True:
@@ -164,26 +181,14 @@ def check_cash_profiles(data: Dict):
                         manager_suspended = False
 
                         if kasa_process:
-                            try:
-                                kasa_process.kill()
-                                print(f"{Fore.GREEN}✓ Stopped checkbox_kasa.exe (PID: {kasa_process.pid}){Style.RESET_ALL}")
-                                stop_event = threading.Event()
-                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process stopped"))
-                                spinner_thread.start()
-                                time.sleep(1)
-                                stop_event.set()
-                                spinner_thread.join()
-                            except psutil.NoSuchProcess:
-                                pass
-                            except Exception as e:
-                                print(f"{Fore.RED}✗ Failed to stop process: {e}{Style.RESET_ALL}")
-                                stop_event = threading.Event()
-                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process error"))
-                                spinner_thread.start()
-                                time.sleep(2)
-                                stop_event.set()
-                                spinner_thread.join()
+                            if not terminate_process_with_confirmation(kasa_process, "checkbox_kasa.exe"):
                                 continue
+                            stop_event = threading.Event()
+                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process stopped"))
+                            spinner_thread.start()
+                            time.sleep(1)
+                            stop_event.set()
+                            spinner_thread.join()
 
                         if manager_processes:
                             print(f"{Fore.YELLOW}⏸ Suspending manager processes...{Style.RESET_ALL}")
@@ -455,19 +460,14 @@ def check_cash_profiles(data: Dict):
 
                     kasa_process = find_process_by_path("checkbox_kasa.exe", selected_profile['path'])
                     if kasa_process:
-                        try:
-                            kasa_process.kill()
-                            print(f"{Fore.GREEN}✓ Stopped checkbox_kasa.exe (PID: {kasa_process.pid}){Style.RESET_ALL}")
-                            stop_event = threading.Event()
-                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process stopped"))
-                            spinner_thread.start()
-                            time.sleep(1)
-                            stop_event.set()
-                            spinner_thread.join()
-                        except psutil.NoSuchProcess:
-                            pass
-                        except Exception as e:
-                            print(f"{Fore.RED}✗ Failed to stop process: {e}{Style.RESET_ALL}")
+                        if not terminate_process_with_confirmation(kasa_process, "checkbox_kasa.exe"):
+                            continue
+                        stop_event = threading.Event()
+                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process stopped"))
+                        spinner_thread.start()
+                        time.sleep(1)
+                        stop_event.set()
+                        spinner_thread.join()
 
                     manager_processes = find_all_processes_by_name("kasa_manager.exe")
                     if manager_processes:

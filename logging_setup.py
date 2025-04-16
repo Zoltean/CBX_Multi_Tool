@@ -7,7 +7,7 @@ import os
 LOG_TO_FILE = True
 
 # Константа для включения вывода логов в консоль
-CONSOLE_LOG_ENABLED = True  # Новая константа
+CONSOLE_LOG_ENABLED = False  # Новая константа
 
 # Константа для включения пауз после консольных логов
 CONSOLE_LOG_WITH_PAUSE = False

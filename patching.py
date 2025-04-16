@@ -5,12 +5,9 @@ import sys
 import time
 import zipfile
 import threading
-import logging
-import hashlib
 from typing import Dict, Optional, List
 from tqdm import tqdm
 from colorama import Fore, Style
-
 import psutil
 from config import DRIVES
 from utils import find_process_by_path, find_all_processes_by_name, manage_processes, show_spinner
@@ -18,16 +15,12 @@ from network import download_file
 from backup_restore import create_backup, restore_from_backup, delete_backup
 from search_utils import find_cash_registers_by_profiles_json, find_cash_registers_by_exe, get_cash_register_info, reset_cache
 
-# Настройка логирования
-#logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-
 def install_file(file_data: Dict, paylink_patch_data: Optional[Dict] = None, data: Optional[Dict] = None, expected_sha256: str = "") -> bool:
     filename = file_data["name"]
     url = file_data["url"]
     print(f"{Fore.CYAN}📥 Preparing to install {filename}...{Style.RESET_ALL}")
 
     try:
-        logging.debug(f"Installing file {filename} with expected SHA256: {expected_sha256}")
         if not download_file(url, filename, expected_sha256=expected_sha256):
             if expected_sha256:
                 print(f"{Fore.YELLOW}⚠ Hash verification failed for {filename}.{Style.RESET_ALL}")
@@ -39,14 +32,6 @@ def install_file(file_data: Dict, paylink_patch_data: Optional[Dict] = None, dat
             else:
                 print(f"{Fore.RED}✗ Installation cancelled.{Style.RESET_ALL}")
                 return False
-
-        # Log actual hash
-        try:
-            with open(filename, "rb") as f:
-                actual_hash = hashlib.sha256(f.read()).hexdigest()
-                logging.debug(f"Actual SHA256 for {filename}: {actual_hash}")
-        except Exception as e:
-            logging.warning(f"Failed to compute actual hash for {filename}: {e}")
 
         print(f"{Fore.CYAN}🚀 Launching installer...{Style.RESET_ALL}")
         if not os.path.exists(filename):
@@ -153,10 +138,6 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
     print(f"{Fore.CYAN}📥 Preparing to apply {patch_file_name}...{Style.RESET_ALL}")
 
     try:
-        # Log expected hash
-        logging.debug(f"Expected SHA256 for {patch_file_name}: {expected_sha256}")
-
-        # Download file with hash verification
         if not download_file(patch_url, patch_file_name, expected_sha256=expected_sha256):
             if expected_sha256:
                 print(f"{Fore.YELLOW}⚠ Hash verification failed for {patch_file_name}.{Style.RESET_ALL}")
@@ -167,14 +148,6 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                 print(f"{Fore.YELLOW}⚠ Proceeding without hash verification.{Style.RESET_ALL}")
             else:
                 print(f"{Fore.YELLOW}⚠ No hash provided for {patch_file_name}. Proceeding without verification.{Style.RESET_ALL}")
-
-        # Log actual hash
-        try:
-            with open(patch_file_name, "rb") as f:
-                actual_hash = hashlib.sha256(f.read()).hexdigest()
-                logging.debug(f"Actual SHA256 for {patch_file_name}: {actual_hash}")
-        except Exception as e:
-            logging.warning(f"Failed to compute actual hash for {patch_file_name}: {e}")
 
         target_folder = "checkbox.kasa.manager" if is_rro_agent else (
             "Checkbox PayLink (Beta)" if is_paylink else "checkbox.kasa.manager")
@@ -224,7 +197,6 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
         print(f"{Fore.GREEN}✓ Found installation directory: {install_dir}{Style.RESET_ALL}")
 
         if is_rro_agent:
-            # Search for cash registers
             profiles_info = []
             manager_dir = install_dir
 
@@ -232,34 +204,19 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
             spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Searching cash registers"))
             spinner_thread.start()
 
-            reset_cache()  # Сбрасываем кэш перед поиском
-            logging.debug(f"Starting cash register search for manager_dir={manager_dir}")
-
+            reset_cache()
             if manager_dir:
-                # Читаем profiles.json
                 cash_registers, is_empty, seen_paths = find_cash_registers_by_profiles_json(manager_dir)
-                logging.debug(f"find_cash_registers_by_profiles_json returned: cash_registers={cash_registers}, is_empty={is_empty}, seen_paths={seen_paths}")
-
                 if is_empty:
                     print(f"{Fore.RED}! ! ! PROFILES.JSON IS EMPTY ! ! !{Style.RESET_ALL}")
 
-                # Добавляем кассы из profiles.json (не внешние)
                 if cash_registers:
                     for cash in cash_registers:
                         if cash and "path" in cash:
                             profile_info = get_cash_register_info(cash["path"], is_external=False)
                             if profile_info:
                                 profiles_info.append(profile_info)
-                                logging.debug(f"Added profile from profiles.json: {cash['path']}")
-                            else:
-                                logging.warning(f"Failed to get info for cash register: {cash['path']}")
-                        else:
-                            logging.warning(f"Invalid cash register data: {cash}")
-
-                # Ищем дополнительные кассы через checkbox_kasa.exe
                 external_cashes = find_cash_registers_by_exe(manager_dir, drives, max_depth=4)
-                logging.debug(f"find_cash_registers_by_exe returned: external_cashes={external_cashes}")
-
                 if external_cashes:
                     for cash in external_cashes:
                         if cash and "path" in cash:
@@ -268,33 +225,15 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                                 profile_info = get_cash_register_info(cash["path"], is_external=True)
                                 if profile_info:
                                     profiles_info.append(profile_info)
-                                    logging.debug(f"Added external cash register: {normalized_path}")
-                                else:
-                                    logging.warning(f"Failed to get info for external cash register: {cash['path']}")
                             seen_paths.add(normalized_path)
-                        else:
-                            logging.warning(f"Invalid external cash register data: {cash}")
-                else:
-                    logging.info("No external cash registers found")
-
             else:
-                # Если нет менеджера, ищем кассы по процессам и файловой системе
                 external_cashes = find_cash_registers_by_exe(None, drives, max_depth=4)
-                logging.debug(f"find_cash_registers_by_exe (no manager) returned: external_cashes={external_cashes}")
-
                 if external_cashes:
                     for cash in external_cashes:
                         if cash and "path" in cash:
                             profile_info = get_cash_register_info(cash["path"], is_external=True)
                             if profile_info:
                                 profiles_info.append(profile_info)
-                                logging.debug(f"Added external cash register (no manager): {cash['path']}")
-                            else:
-                                logging.warning(f"Failed to get info for external cash register: {cash['path']}")
-                        else:
-                            logging.warning(f"Invalid external cash register data: {cash}")
-                else:
-                    logging.info("No cash registers found without manager")
 
             stop_event.set()
             spinner_thread.join()
@@ -317,7 +256,6 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                 print(f"{Fore.CYAN}Available profiles:{Style.RESET_ALL}\n")
                 for i, profile in enumerate(profiles_info, 1):
                     if profile is None:
-                        logging.warning(f"Profile at index {i} is None")
                         continue
                     health_color = Fore.GREEN if profile["health"] == "OK" else Fore.RED
                     trans_color = Fore.GREEN if profile["trans_status"] in ["DONE", "EMPTY"] else Fore.RED
@@ -344,7 +282,6 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                         backup_files = [f for f in os.listdir(profiles_dir) if f.endswith(".zip") and "backup" in f.lower()]
                 except Exception as e:
                     print(f"{Fore.RED}✗ Failed to list backups: {e}{Style.RESET_ALL}")
-                    logging.error(f"Failed to list backups in {profiles_dir}: {e}")
 
                 if backup_files:
                     print(f"\n{Fore.YELLOW}Available backups:{Style.RESET_ALL}")
@@ -472,7 +409,6 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                         selected_profile = profiles_info[choice_int - 1]
                         if selected_profile is None:
                             print(f"{Fore.RED}✗ Selected profile is invalid.{Style.RESET_ALL}")
-                            logging.error(f"Selected profile at index {choice_int - 1} is None")
                             stop_event = threading.Event()
                             spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid profile"))
                             spinner_thread.start()
@@ -555,19 +491,21 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                 if choice == "y":
                     print(f"{Fore.YELLOW}Stopping cash register processes...{Style.RESET_ALL}")
                     for proc in cash_processes:
-                        try:
-                            proc.kill()
-                            print(f"{Fore.GREEN}✓ Stopped checkbox_kasa.exe (PID: {proc.pid}).{Style.RESET_ALL}")
-                            stop_event = threading.Event()
-                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process stopped"))
-                            spinner_thread.start()
-                            time.sleep(1)
-                            stop_event.set()
-                            spinner_thread.join()
-                        except psutil.NoSuchProcess:
-                            pass
-                        except Exception:
-                            print(f"{Fore.RED}✗ Failed to stop checkbox_kasa.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                        confirm = input(f"{Fore.CYAN}Terminate checkbox_kasa.exe (PID: {proc.pid})? (Y/N): {Style.RESET_ALL}").strip().lower()
+                        if confirm == "y":
+                            try:
+                                proc.terminate()
+                                print(f"{Fore.GREEN}✓ Terminated checkbox_kasa.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                                stop_event = threading.Event()
+                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process terminated"))
+                                spinner_thread.start()
+                                time.sleep(1)
+                                stop_event.set()
+                                spinner_thread.join()
+                            except psutil.NoSuchProcess:
+                                pass
+                            except Exception:
+                                print(f"{Fore.RED}✗ Failed to terminate checkbox_kasa.exe (PID: {proc.pid}).{Style.RESET_ALL}")
                     time.sleep(1)
                 else:
                     print(f"{Fore.RED}✗ Update cancelled.{Style.RESET_ALL}")

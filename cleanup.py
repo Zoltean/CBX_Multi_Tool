@@ -64,26 +64,28 @@ def cleanup(data: Dict):
                     continue
 
                 for proc in processes:
-                    try:
-                        proc.terminate()
-                        proc.wait(timeout=5)  # Ждем завершения процесса до 5 секунд
-                        print(f"{Fore.GREEN}✓ Terminated {process_name} (PID: {proc.pid}).{Style.RESET_ALL}")
-                        stop_event = threading.Event()
-                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process stopped"))
-                        spinner_thread.start()
-                        time.sleep(0.5)
-                        stop_event.set()
-                        spinner_thread.join()
-                    except psutil.TimeoutExpired:
-                        print(f"{Fore.YELLOW}⚠ Process {process_name} did not terminate gracefully. Forcing...{Style.RESET_ALL}")
-                        proc.kill()
-                        print(f"{Fore.GREEN}✓ Force killed {process_name} (PID: {proc.pid}).{Style.RESET_ALL}")
-                    except psutil.NoSuchProcess:
-                        pass
-                    except psutil.AccessDenied:
-                        print(f"{Fore.RED}✗ Access denied for {process_name}. Please run as admin.{Style.RESET_ALL}")
-                    except Exception as e:
-                        print(f"{Fore.RED}✗ Failed to terminate {process_name}: {e}{Style.RESET_ALL}")
+                    confirm = input(f"{Fore.CYAN}Terminate {process_name} (PID: {proc.pid})? (Y/N): {Style.RESET_ALL}").strip().lower()
+                    if confirm == "y":
+                        try:
+                            proc.terminate()
+                            proc.wait(timeout=5)
+                            print(f"{Fore.GREEN}✓ Terminated {process_name} (PID: {proc.pid}).{Style.RESET_ALL}")
+                            stop_event = threading.Event()
+                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process terminated"))
+                            spinner_thread.start()
+                            time.sleep(0.5)
+                            stop_event.set()
+                            spinner_thread.join()
+                        except psutil.TimeoutExpired:
+                            print(f"{Fore.YELLOW}⚠ Process {process_name} did not terminate gracefully. Forcing...{Style.RESET_ALL}")
+                            proc.terminate()
+                            print(f"{Fore.GREEN}✓ Force terminated {process_name} (PID: {proc.pid}).{Style.RESET_ALL}")
+                        except psutil.NoSuchProcess:
+                            pass
+                        except psutil.AccessDenied:
+                            print(f"{Fore.RED}✗ Access denied for {process_name}. Please run as admin.{Style.RESET_ALL}")
+                        except Exception as e:
+                            print(f"{Fore.RED}✗ Failed to terminate {process_name}: {e}{Style.RESET_ALL}")
 
         with tqdm(total=len(files_to_delete), desc="Cleaning files",
                   bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}") as pbar:

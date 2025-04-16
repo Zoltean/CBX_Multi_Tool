@@ -14,6 +14,23 @@ from colorama import Fore, Style
 
 from utils import find_process_by_path, find_all_processes_by_name, manage_processes, show_spinner
 
+def terminate_process_with_confirmation(proc: psutil.Process, process_name: str) -> bool:
+    confirm = input(f"{Fore.CYAN}Terminate {process_name} (PID: {proc.pid})? (Y/N): {Style.RESET_ALL}").strip().lower()
+    if confirm == "y":
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+            print(f"{Fore.GREEN}✓ Stopped {process_name} (PID: {proc.pid}).{Style.RESET_ALL}")
+            return True
+        except psutil.TimeoutExpired:
+            proc.terminate()
+            print(f"{Fore.GREEN}✓ Force stopped {process_name} (PID: {proc.pid}).{Style.RESET_ALL}")
+            return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            print(f"{Fore.RED}✗ Failed to stop {process_name} (PID: {proc.pid}).{Style.RESET_ALL}")
+            return False
+    return False
+
 def create_backup(target_dir: str) -> Optional[str]:
     print(f"{Fore.CYAN}📦 Creating backup for {os.path.basename(target_dir)}...{Style.RESET_ALL}")
     backup_name = f"{os.path.basename(target_dir)}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
@@ -104,13 +121,15 @@ def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = 
         if choice == "y":
             print(f"{Fore.YELLOW}Stopping processes...{Style.RESET_ALL}")
             for proc in running_processes:
-                try:
-                    proc.kill()
-                    print(f"{Fore.GREEN}✓ Stopped {proc.info['name']} (PID: {proc.pid}).{Style.RESET_ALL}")
-                except psutil.NoSuchProcess:
-                    pass
-                except Exception:
-                    print(f"{Fore.RED}✗ Failed to stop {proc.info['name']} (PID: {proc.pid}).{Style.RESET_ALL}")
+                if not terminate_process_with_confirmation(proc, proc.info['name']):
+                    print(f"{Fore.RED}✗ Restoration cancelled due to process termination failure.{Style.RESET_ALL}")
+                    stop_event = threading.Event()
+                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Restore cancelled"))
+                    spinner_thread.start()
+                    time.sleep(2)
+                    stop_event.set()
+                    spinner_thread.join()
+                    return False
             # Immediately suspend manager processes to prevent cash restart
             if is_rro_agent and manager_running:
                 print(f"{Fore.YELLOW}Pausing manager processes...{Style.RESET_ALL}")
