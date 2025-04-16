@@ -19,6 +19,15 @@ _cache = {
     "external_cashes": []
 }
 
+# Список системних і прихованих директорій, які слід виключити зі сканування
+EXCLUDED_DIRS = [
+    "windows", "appdata", "programdata", "system32", "syswow64",
+    "$recycle.bin", "recovery", "boot", "perflogs", "$getcurrent"
+]
+
+# Назва теки менеджера для пошуку
+MANAGER_FOLDER_NAME = "checkbox.kasa.manager"
+
 @contextmanager
 def sqlite_connection(db_path: str):
     conn = None
@@ -43,40 +52,69 @@ def reset_cache():
         "external_cashes": []
     }
 
-def find_manager_by_exe(drives: list, max_depth: int = 3, use_cache: bool = True) -> Optional[str]:
+def is_hidden_folder(filepath: str) -> bool:
+    """
+    Перевіряє, чи є папка прихованою (на основі атрибутів файлу).
+    Ігнорує перевірку для кореневих директорій дисків.
+    """
+    # Перевіряємо, чи шлях є коренем диска (наприклад, C:\)
+    if os.path.abspath(filepath) == os.path.abspath(os.path.dirname(filepath + os.sep)):
+        return False
+    try:
+        attrs = os.stat(filepath).st_file_attributes
+        return bool(attrs & 0x02)  # FILE_ATTRIBUTE_HIDDEN
+    except (OSError, AttributeError):
+        return False
+
+def find_manager_by_exe(drives: list, max_depth: int = 4, use_cache: bool = True) -> Optional[str]:
     global _cache
     if use_cache and _cache["manager_dir"] is not None:
         return _cache["manager_dir"]
 
+    # Спочатку перевіряємо запущені процеси
     for proc in psutil.process_iter(['pid', 'exe']):
         try:
             if proc.name().lower() == "kasa_manager.exe":
                 manager_path = os.path.normpath(os.path.abspath(os.path.dirname(proc.exe())))
-                _cache["manager_dir"] = manager_path
-                return manager_path
+                # Перевіряємо, чи шлях не належить до виключених директорій
+                if not any(excluded in manager_path.lower() for excluded in EXCLUDED_DIRS):
+                    _cache["manager_dir"] = manager_path
+                    return manager_path
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
 
     drives = [os.path.normpath(os.path.abspath(drive)) for drive in drives]
 
+    # Пошук теки з назвою MANAGER_FOLDER_NAME
     for drive in drives:
         try:
             for root, dirs, files in os.walk(drive, topdown=True):
                 root_normalized = os.path.normpath(os.path.abspath(root))
-                if any(excluded in root_normalized.lower() for excluded in ["windows", "appdata", "programdata"]):
+                root_basename = os.path.basename(root_normalized).lower()
+
+                # Пропускаємо системні та виключені директорії
+                if any(excluded in root_normalized.lower() for excluded in EXCLUDED_DIRS):
                     dirs[:] = []
                     continue
 
-                depth = len(os.path.relpath(root_normalized, drive).split(os.sep))
+                # Пропускаємо приховані папки (окрім кореня диска)
+                if is_hidden_folder(root_normalized):
+                    dirs[:] = []
+                    continue
 
+                # Обмежуємо глибину сканування
+                depth = len(os.path.relpath(root_normalized, drive).split(os.sep))
                 if depth > max_depth:
                     dirs[:] = []
                     continue
 
-                if "kasa_manager.exe" in files:
-                    manager_path = root_normalized
-                    _cache["manager_dir"] = manager_path
-                    return manager_path
+                # Перевіряємо, чи поточна тека має назву MANAGER_FOLDER_NAME
+                if root_basename == MANAGER_FOLDER_NAME.lower():
+                    # Перевіряємо наявність kasa_manager.exe у цій теці
+                    if "kasa_manager.exe" in files:
+                        manager_path = root_normalized
+                        _cache["manager_dir"] = manager_path
+                        return manager_path
 
         except (PermissionError, OSError):
             continue
@@ -112,11 +150,13 @@ def find_cash_registers_by_profiles_json(manager_dir: str, use_cache: bool = Tru
                 exec_path = profile.get("local", {}).get("paths", {}).get("exec_path", "")
                 if exec_path:
                     exec_path_normalized = os.path.normpath(os.path.abspath(exec_path))
-                    cash_registers.append({
-                        "path": exec_path_normalized,
-                        "source": "profiles_json"
-                    })
-                    seen_paths.add(exec_path_normalized)
+                    # Перевіряємо, чи шлях не належить до виключених директорій
+                    if not any(excluded in exec_path_normalized.lower() for excluded in EXCLUDED_DIRS):
+                        cash_registers.append({
+                            "path": exec_path_normalized,
+                            "source": "profiles_json"
+                        })
+                        seen_paths.add(exec_path_normalized)
     except (json.JSONDecodeError, Exception):
         pass
 
@@ -135,11 +175,15 @@ def find_cash_registers_by_exe(manager_dir: Optional[str], drives: List[str], ma
     seen_paths = set(_cache["profile_seen_paths"])
     manager_dir_normalized = os.path.normpath(os.path.abspath(manager_dir)) if manager_dir else None
 
+    # Перевіряємо запущені процеси
     for proc in psutil.process_iter(['pid', 'exe', 'cwd']):
         try:
             if proc.name().lower() == "checkbox_kasa.exe":
                 cash_dir = os.path.normpath(os.path.abspath(proc.cwd()))
                 if manager_dir_normalized and cash_dir == manager_dir_normalized:
+                    continue
+                # Пропускаємо системні та виключені директорії
+                if any(excluded in cash_dir.lower() for excluded in EXCLUDED_DIRS):
                     continue
                 if cash_dir not in seen_paths:
                     cash_entry = {
@@ -166,12 +210,19 @@ def find_cash_registers_by_exe(manager_dir: Optional[str], drives: List[str], ma
         try:
             for root, dirs, files in os.walk(search_dir, topdown=True):
                 root_normalized = os.path.normpath(os.path.abspath(root))
-                if any(excluded in root_normalized.lower() for excluded in ["windows", "appdata", "programdata"]):
+
+                # Пропускаємо системні та виключені директорії
+                if any(excluded in root_normalized.lower() for excluded in EXCLUDED_DIRS):
                     dirs[:] = []
                     continue
 
-                depth = len(os.path.relpath(root_normalized, search_dir).split(os.sep))
+                # Пропускаємо приховані папки
+                if is_hidden_folder(root_normalized):
+                    dirs[:] = []
+                    continue
 
+                # Обмежуємо глибину сканування
+                depth = len(os.path.relpath(root_normalized, search_dir).split(os.sep))
                 if depth > max_depth:
                     dirs[:] = []
                     continue
