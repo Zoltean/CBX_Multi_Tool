@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import json
 import os
 import subprocess
@@ -18,7 +17,6 @@ from search_utils import (
     find_cash_registers_by_exe, get_cash_register_info, reset_cache
 )
 
-# Инициализация colorama
 init(autoreset=True)
 
 def check_cash_profiles(data: Dict):

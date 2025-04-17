@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import os
 
 VPS_API_URL = "https://zoltean.zapto.org/multitool/api/versions"

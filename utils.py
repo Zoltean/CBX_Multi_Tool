@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import ctypes
 import json
 import os
@@ -217,7 +216,6 @@ def launch_executable(
         return False
 
 
-# utils.py
 def display_list_and_choose(
         title: str,
         items: List[Dict],
@@ -379,7 +377,6 @@ def manage_processes(processes_to_kill: List[str], target_dirs: List[str],
         return False
 
 
-# utils.py
 def launch_executable(
         executable_name: str,
         target_dir: str,
