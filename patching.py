@@ -341,7 +341,10 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                     f"{Fore.CYAN}Create backup of {os.path.basename(target_dir)} before updating? (Y/N): {Style.RESET_ALL}").strip().lower()
                 if choice == "y":
                     backup_path = create_backup(target_dir)
-                    if not backup_path:
+                    if backup_path:
+                        print(f"{Fore.GREEN}✓ Backup created successfully for {os.path.basename(target_dir)}!{Style.RESET_ALL}")
+                        run_spinner("Backup created", 1.0)
+                    else:
                         print(f"{Fore.RED}✗ Backup failed. Continuing without backup...{Style.RESET_ALL}")
                         run_spinner("Backup failed", 2.0)
                 else:
@@ -361,20 +364,18 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                 print(f"{Fore.RED}⚠ Cash register process is running!{Style.RESET_ALL}")
                 for proc in cash_processes:
                     print(f" - PID: {proc.pid}")
-                choice = input(f"{Fore.CYAN}Close cash register processes? (Y/N): {Style.RESET_ALL}").strip().lower()
+                choice = input(f"{Fore.CYAN}Close all cash register processes? (Y/N): {Style.RESET_ALL}").strip().lower()
                 if choice == "y":
                     print(f"{Fore.YELLOW}Stopping cash register processes...{Style.RESET_ALL}")
                     for proc in cash_processes:
-                        confirm = input(f"{Fore.CYAN}Terminate checkbox_kasa.exe (PID: {proc.pid})? (Y/N): {Style.RESET_ALL}").strip().lower()
-                        if confirm == "y":
-                            try:
-                                proc.terminate()
-                                print(f"{Fore.GREEN}✓ Terminated checkbox_kasa.exe (PID: {proc.pid}).{Style.RESET_ALL}")
-                                run_spinner("Process terminated", 1.0)
-                            except psutil.NoSuchProcess:
-                                pass
-                            except Exception:
-                                print(f"{Fore.RED}✗ Failed to terminate checkbox_kasa.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                        try:
+                            proc.kill()
+                            print(f"{Fore.GREEN}✓ Killed checkbox_kasa.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                            run_spinner("Process killed", 1.0)
+                        except psutil.NoSuchProcess:
+                            print(f"{Fore.YELLOW}⚠ checkbox_kasa.exe (PID: {proc.pid}) already terminated.{Style.RESET_ALL}")
+                        except Exception as e:
+                            print(f"{Fore.RED}✗ Failed to kill checkbox_kasa.exe (PID: {proc.pid}): {e}{Style.RESET_ALL}")
                     time.sleep(1)
                 else:
                     print(f"{Fore.RED}✗ Update cancelled.{Style.RESET_ALL}")
