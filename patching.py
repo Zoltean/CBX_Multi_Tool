@@ -64,7 +64,7 @@ def install_file(file_data: Dict, paylink_patch_data: Optional[Dict] = None, dat
                             "Checkbox PayLink (Beta)",
                             data,
                             is_paylink=True,
-                            expected_sha256=latest_paylink_patch.get("sha256", "")
+                            expected_sha256=latest_paylink_patch.get("patch_sha256", "")
                         )
                         if patch_success:
                             print(f"{Fore.GREEN}✓ PayLink updated successfully!{Style.RESET_ALL}")

@@ -90,6 +90,7 @@ def fetch_json(url: str) -> Optional[Dict]:
 
 def download_file(url: str, filename: str, expected_sha256: str = "") -> bool:
     print(f"{Fore.CYAN}📥 Preparing to download {filename}...{Style.RESET_ALL}")
+    expected_sha256 = expected_sha256.lower() if expected_sha256 else ""
     try:
         if os.path.exists(filename):
             print(f"{Fore.YELLOW}⚠ {filename} already exists, checking hash...{Style.RESET_ALL}")
