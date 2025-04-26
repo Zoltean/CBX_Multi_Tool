@@ -147,19 +147,19 @@ def extract_to_multiple_dirs(zip_ref: zipfile.ZipFile, target_dirs: List[str], t
         print(f"{Fore.RED}✗ Extraction error: {e}{Style.RESET_ALL}")
         raise
 
-def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent:bool = False,
-
+def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: bool = False,
                is_paylink: bool = False, expected_sha256: str = "") -> bool:
-    patch_file_name = patch_data["patch_name"]
-    patch_url = patch_data["patch_url"]
-    print(f"{Fore.CYAN}📥 Preparing to apply {patch_file_name}...{Style.RESET_ALL}")
     """
     Застосовує патч до вказаних профілів або директорій.
 
     Функція завантажує патч, перевіряє його SHA256-хеш, створює резервну копію (за бажанням),
     розпаковує файли патча в цільові директорії, контролює процеси та перезапускає програми
     після оновлення. Для RRO-агентів дозволяє вибрати профіль або оновити всі профілі.
-    
+    Перевіряє, чи запущені процеси каси, менеджера або PayLink, і вимагає їх зупинки.
+    Для каси перевіряє, чи не заблокована тека com-server. Якщо каса і менеджер запущені,
+    вбиває тільки касу, заморожує менеджер, виконує патчинг, запускає касу, чекає 10 секунд,
+    потім розморожує менеджер.
+
     Args:
         patch_data (Dict): Словник із даними патча (patch_name, patch_url, sha256).
         folder_name (str): Назва цільової папки (наприклад, "checkbox.kasa.manager").
@@ -167,14 +167,18 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent:bool
         is_rro_agent (bool, optional): Чи є цільовим RRO-агент. Defaults to False.
         is_paylink (bool, optional): Чи є цільовим PayLink. Defaults to False.
         expected_sha256 (str, optional): Очікуваний SHA256-хеш патча. Defaults to "".
-    
+
     Returns:
         bool: True, якщо оновлення успішне, False у разі помилки.
-    
+
     Raises:
         Exception: Помилки, такі як PermissionError, zipfile.BadZipFile або проблеми з мережею.
     """
     try:
+        patch_file_name = patch_data["patch_name"]
+        patch_url = patch_data["patch_url"]
+        print(f"{Fore.CYAN}📥 Preparing to apply {patch_file_name}...{Style.RESET_ALL}")
+
         if not download_file(patch_url, patch_file_name, expected_sha256=expected_sha256):
             if expected_sha256:
                 print(f"{Fore.YELLOW}⚠ Hash verification failed for {patch_file_name}.{Style.RESET_ALL}")
@@ -394,6 +398,77 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent:bool
                     print(f"{Fore.RED}✗ Invalid input.{Style.RESET_ALL}")
                     run_spinner("Invalid input", 2.0)
 
+            cash_processes = []
+            for target_dir in target_dirs:
+                process = find_process_by_path("checkbox_kasa.exe", target_dir)
+                if process:
+                    cash_processes.append(process)
+
+            manager_processes = find_all_processes_by_name("kasa_manager.exe")
+            manager_running = bool(manager_processes)
+            cash_running = bool(cash_processes)
+
+            if cash_running or manager_running:
+                print(f"{Fore.RED}⚠ Processes are running!{Style.RESET_ALL}")
+                if cash_running:
+                    print(f"{Fore.RED}Cash register processes:{Style.RESET_ALL}")
+                    for proc in cash_processes:
+                        print(f" - PID: {proc.pid}")
+                if manager_running:
+                    print(f"{Fore.RED}Manager processes:{Style.RESET_ALL}")
+                    for proc in manager_processes:
+                        print(f" - PID: {proc.pid}")
+                choice = input(f"{Fore.CYAN}Close cash register processes and suspend manager to proceed with update? (Y/N): {Style.RESET_ALL}").strip().lower()
+                if choice == "y":
+                    print(f"{Fore.YELLOW}Preparing to stop cash register processes...{Style.RESET_ALL}")
+                    if cash_running:
+                        for proc in cash_processes:
+                            try:
+                                proc.kill()
+                                print(f"{Fore.GREEN}✓ Killed checkbox_kasa.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                                run_spinner("Process killed", 1.0)
+                            except psutil.NoSuchProcess:
+                                print(f"{Fore.YELLOW}⚠ checkbox_kasa.exe (PID: {proc.pid}) already terminated.{Style.RESET_ALL}")
+                            except Exception as e:
+                                print(f"{Fore.RED}✗ Failed to kill checkbox_kasa.exe (PID: {proc.pid}): {e}{Style.RESET_ALL}")
+                                run_spinner("Process kill failed", 2.0)
+                                return False
+                    time.sleep(1)
+                    if manager_running:
+                        print(f"{Fore.YELLOW}Suspending manager processes...{Style.RESET_ALL}")
+                        for proc in manager_processes:
+                            try:
+                                proc.suspend()
+                                print(f"{Fore.GREEN}✓ Suspended kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                                run_spinner("Process suspended", 1.0)
+                            except psutil.NoSuchProcess:
+                                print(f"{Fore.YELLOW}⚠ kasa_manager.exe (PID: {proc.pid}) already terminated.{Style.RESET_ALL}")
+                            except Exception as e:
+                                print(f"{Fore.RED}✗ Failed to suspend kasa_manager.exe (PID: {proc.pid}): {e}{Style.RESET_ALL}")
+                                run_spinner("Process suspend failed", 2.0)
+                                return False
+                else:
+                    print(f"{Fore.RED}✗ Update cancelled: Processes must be stopped or suspended.{Style.RESET_ALL}")
+                    run_spinner("Update cancelled", 2.0)
+                    return False
+
+            # Перевірка заблокованості теки com-server для каси
+            for target_dir in target_dirs:
+                com_server_dir = os.path.join(target_dir, "com-server")
+                if os.path.exists(com_server_dir):
+                    temp_name = os.path.join(target_dir, "com-server_temp")
+                    try:
+                        os.rename(com_server_dir, temp_name)
+                        os.rename(temp_name, com_server_dir)  # Повертаємо оригінальну назву
+                    except PermissionError:
+                        print(f"{Fore.RED}✗ Directory {com_server_dir} is locked. Please close the application using it.{Style.RESET_ALL}")
+                        run_spinner("Directory locked", 2.0)
+                        return False
+                    except Exception as e:
+                        print(f"{Fore.RED}✗ Failed to check com-server directory: {e}{Style.RESET_ALL}")
+                        run_spinner("Directory check error", 2.0)
+                        return False
+
             for target_dir in target_dirs:
                 choice = input(
                     f"{Fore.CYAN}Create backup of {os.path.basename(target_dir)} before updating? (Y/N): {Style.RESET_ALL}").strip().lower()
@@ -408,59 +483,35 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent:bool
                 else:
                     print(f"{Fore.GREEN}✓ Backup skipped.{Style.RESET_ALL}")
 
-            cash_processes = []
-            for target_dir in target_dirs:
-                process = find_process_by_path("checkbox_kasa.exe", target_dir)
-                if process:
-                    cash_processes.append(process)
-
-            manager_processes = find_all_processes_by_name("kasa_manager.exe")
-            manager_running = bool(manager_processes)
-            cash_running = bool(cash_processes)
-
-            if cash_running:
-                print(f"{Fore.RED}⚠ Cash register process is running!{Style.RESET_ALL}")
-                for proc in cash_processes:
-                    print(f" - PID: {proc.pid}")
-                choice = input(f"{Fore.CYAN}Close all cash register processes? (Y/N): {Style.RESET_ALL}").strip().lower()
-                if choice == "y":
-                    print(f"{Fore.YELLOW}Stopping cash register processes...{Style.RESET_ALL}")
-                    for proc in cash_processes:
-                        try:
-                            proc.kill()
-                            print(f"{Fore.GREEN}✓ Killed checkbox_kasa.exe (PID: {proc.pid}).{Style.RESET_ALL}")
-                            run_spinner("Process killed", 1.0)
-                        except psutil.NoSuchProcess:
-                            print(f"{Fore.YELLOW}⚠ checkbox_kasa.exe (PID: {proc.pid}) already terminated.{Style.RESET_ALL}")
-                        except Exception as e:
-                            print(f"{Fore.RED}✗ Failed to kill checkbox_kasa.exe (PID: {proc.pid}): {e}{Style.RESET_ALL}")
-                    time.sleep(1)
-                else:
-                    print(f"{Fore.RED}✗ Update cancelled.{Style.RESET_ALL}")
-                    run_spinner("Update cancelled", 2.0)
-                    return False
-
-                if manager_running:
-                    print(f"{Fore.YELLOW}Pausing manager processes...{Style.RESET_ALL}")
-                    for proc in manager_processes:
-                        try:
-                            proc.suspend()
-                            print(f"{Fore.GREEN}✓ Paused kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
-                            run_spinner("Process paused", 1.0)
-                        except psutil.NoSuchProcess:
-                            pass
-                        except Exception:
-                            print(f"{Fore.RED}✗ Failed to pause kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
-            elif manager_running:
-                print(f"{Fore.YELLOW}Cash register not running, manager running - proceeding...{Style.RESET_ALL}")
-            else:
-                print(f"{Fore.YELLOW}No cash register or manager processes found, proceeding...{Style.RESET_ALL}")
-
         else:
             target_dirs = [install_dir]
             processes_to_kill = ["CheckboxPayLink.exe", "POSServer.exe"] if is_paylink else ["kasa_manager.exe"]
-            if not manage_processes(processes_to_kill, target_dirs):
-                return False
+            running_processes = []
+            for proc_name in processes_to_kill:
+                processes = find_all_processes_by_name(proc_name)
+                running_processes.extend(processes)
+
+            if running_processes:
+                print(f"{Fore.RED}⚠ Processes are running!{Style.RESET_ALL}")
+                for proc in running_processes:
+                    print(f" - {proc.name()} (PID: {proc.pid})")
+                choice = input(f"{Fore.CYAN}Close all processes to proceed with update? (Y/N): {Style.RESET_ALL}").strip().lower()
+                if choice == "y":
+                    print(f"{Fore.YELLOW}Stopping processes...{Style.RESET_ALL}")
+                    for proc in running_processes:
+                        try:
+                            proc.kill()
+                            print(f"{Fore.GREEN}✓ Killed {proc.name()} (PID: {proc.pid}).{Style.RESET_ALL}")
+                            run_spinner("Process killed", 1.0)
+                        except psutil.NoSuchProcess:
+                            print(f"{Fore.YELLOW}⚠ {proc.name()} (PID: {proc.pid}) already terminated.{Style.RESET_ALL}")
+                        except Exception as e:
+                            print(f"{Fore.RED}✗ Failed to kill {proc.name()} (PID: {proc.pid}): {e}{Style.RESET_ALL}")
+                    time.sleep(1)
+                else:
+                    print(f"{Fore.RED}✗ Update cancelled: Processes must be stopped.{Style.RESET_ALL}")
+                    run_spinner("Update cancelled", 2.0)
+                    return False
 
         stop_monitoring = threading.Event()
         monitor_threads = []
@@ -516,7 +567,22 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent:bool
         for target_dir in target_dirs:
             try:
                 if is_rro_agent:
+                    print(f"{Fore.CYAN}🚀 Launching cash register in {target_dir}...{Style.RESET_ALL}")
                     launch_executable("checkbox_kasa.exe", target_dir, "Cash register", spinner_duration=10.0)
+                    print(f"{Fore.GREEN}✓ Cash register launched successfully!{Style.RESET_ALL}")
+                    if manager_running:
+                        print(f"{Fore.YELLOW}⏳ Waiting 10 seconds before resuming manager...{Style.RESET_ALL}")
+                        run_spinner("Waiting for cash register initialization", 10.0)
+                        print(f"{Fore.YELLOW}Resuming manager processes...{Style.RESET_ALL}")
+                        for proc in manager_processes:
+                            try:
+                                proc.resume()
+                                print(f"{Fore.GREEN}✓ Resumed kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
+                                run_spinner("Process resumed", 1.0)
+                            except psutil.NoSuchProcess:
+                                print(f"{Fore.YELLOW}⚠ kasa_manager.exe (PID: {proc.pid}) already terminated.{Style.RESET_ALL}")
+                            except Exception as e:
+                                print(f"{Fore.RED}✗ Failed to resume kasa_manager.exe: {e}{Style.RESET_ALL}")
 
                 elif is_paylink:
                     paylink_path = os.path.join(target_dir, "CheckboxPayLink.exe")
@@ -538,19 +604,8 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent:bool
             except Exception as e:
                 print(f"{Fore.RED}✗ Failed to launch process: {e}{Style.RESET_ALL}")
 
-        if is_rro_agent and cash_running and manager_running and 'manager_processes' in locals():
-            print(f"{Fore.YELLOW}Resuming manager processes...{Style.RESET_ALL}")
-            for proc in manager_processes:
-                try:
-                    proc.resume()
-                    print(f"{Fore.GREEN}✓ Resumed kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
-                    run_spinner("Process resumed", 1.0)
-                except psutil.NoSuchProcess:
-                    print(f"{Fore.YELLOW}⚠ kasa_manager.exe (PID: {proc.pid}) already terminated.{Style.RESET_ALL}")
-                except Exception as e:
-                    print(f"{Fore.RED}✗ Failed to resume kasa_manager.exe: {e}{Style.RESET_ALL}")
-
         run_spinner("Update completed", 1.0)
+        print(f"{Fore.GREEN}✓ Update process completed successfully!{Style.RESET_ALL}")
         return True
     except Exception as e:
         print(f"{Fore.RED}✗ Update error: {e}{Style.RESET_ALL}")
