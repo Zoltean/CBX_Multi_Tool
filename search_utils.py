@@ -5,7 +5,6 @@ from typing import Dict, List, Optional, Set, Tuple
 import json
 from contextlib import contextmanager
 from sqlite3 import Error
-
 import psutil
 from utils import find_process_by_path
 
@@ -34,6 +33,18 @@ COMMON_PATHS = [
 
 @contextmanager
 def sqlite_connection(db_path: str):
+    """
+    Контекстний менеджер для створення та безпечного закриття з’єднання з SQLite базою даних у режимі лише для читання.
+
+    Args:
+        db_path (str): Шлях до файлу бази даних SQLite.
+
+    Yields:
+        sqlite3.Connection: Відкрите з’єднання з базою даних.
+
+    Raises:
+        sqlite3.Error: Якщо не вдалося підключитися до бази даних.
+    """
     conn = None
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5, check_same_thread=False)
@@ -66,6 +77,22 @@ def is_hidden_folder(filepath: str) -> bool:
         return False
 
 def find_manager_by_exe(drives: list, max_depth: int = 4, use_cache: bool = True) -> Optional[str]:
+    """
+    Шукає директорію менеджера, знаходячи запущений процес 'kasa_manager.exe' або скануючи
+    загальні шляхи та диски для папки 'checkbox.kasa.manager' із виконуваним файлом.
+
+    Args:
+        drives (list): Список шляхів до дисків для пошуку (наприклад, ['C:\\', 'D:\\']).
+        max_depth (int): Максимальна глибина пошуку в дереві директорій. За замовчуванням 4.
+        use_cache (bool): Чи використовувати кешовані результати. За замовчуванням True.
+
+    Returns:
+        Optional[str]: Шлях до директорії менеджера, якщо знайдено, або None.
+
+    Raises:
+        PermissionError: Якщо відсутні права доступу до директорій.
+        OSError: Інші помилки файлової системи.
+    """
     global _cache
     if use_cache and _cache["manager_dir"] is not None:
         return _cache["manager_dir"]
@@ -142,6 +169,23 @@ def find_manager_by_exe(drives: list, max_depth: int = 4, use_cache: bool = True
     return None
 
 def find_cash_registers_by_profiles_json(manager_dir: str, use_cache: bool = True) -> Tuple[List[Dict], bool, Set[str]]:
+    """
+    Знаходить каси, аналізуючи файл 'profiles.json' у директорії менеджера.
+
+    Args:
+        manager_dir (str): Шлях до директорії менеджера, що містить 'profiles.json'.
+        use_cache (bool): Чи використовувати кешовані результати. За замовчуванням True.
+
+    Returns:
+        Tuple[List[Dict], bool, Set[str]]: Кортеж, що містить:
+            - Список словників із шляхами до кас та їх джерелом.
+            - Логічне значення, що вказує, чи порожній файл profiles.json.
+            - Множина нормалізованих шляхів, знайдених у profiles.json.
+
+    Raises:
+        json.JSONDecodeError: Якщо файл profiles.json некоректний.
+        Exception: Інші помилки, пов’язані з читанням файлу.
+    """
     global _cache
     if use_cache and _cache["profile_cashes"]:
         return _cache["profile_cashes"], _cache["is_empty_profiles"], _cache["profile_seen_paths"]
@@ -184,6 +228,23 @@ def find_cash_registers_by_profiles_json(manager_dir: str, use_cache: bool = Tru
     return cash_registers, is_empty, seen_paths
 
 def find_cash_registers_by_exe(manager_dir: Optional[str], drives: List[str], max_depth: int = 4, use_cache: bool = True) -> List[Dict]:
+    """
+    Шукає директорії кас, знаходячи запущені процеси 'checkbox_kasa.exe' або
+    скануючи файлову систему на наявність цього виконуваного файлу.
+
+    Args:
+        manager_dir (Optional[str]): Шлях до директорії менеджера або None.
+        drives (List[str]): Список дисків для пошуку.
+        max_depth (int): Максимальна глибина пошуку в дереві директорій. За замовчуванням 4.
+        use_cache (bool): Чи використовувати кешовані результати. За замовчуванням True.
+
+    Returns:
+        List[Dict]: Список словників із шляхами до кас та їх джерелом.
+
+    Raises:
+        PermissionError: Якщо відсутні права доступу до директорій.
+        OSError: Інші помилки файлової системи.
+    """
     global _cache
     if use_cache and (_cache["cash_registers"] or _cache["external_cashes"]):
         return _cache["cash_registers"] + _cache["external_cashes"]
@@ -263,6 +324,20 @@ def find_cash_registers_by_exe(manager_dir: Optional[str], drives: List[str], ma
     return cash_registers + external_cashes
 
 def get_cash_register_info(cash_path: str, is_external: bool = False) -> Dict:
+    """
+    Отримує детальну інформацію про касу за його шляхом.
+
+    Args:
+        cash_path (str): Шлях до директорії каси.
+        is_external (bool): Чи є каса зовнішньою (не в profiles.json). За замовчуванням False.
+
+    Returns:
+        Dict: Словник із інформацією про касу (назва, шлях, стан здоров’я, статус транзакцій, зміни, версія, фіскальний номер, статус запуску).
+
+    Raises:
+        sqlite3.Error: Якщо не вдалося підключитися до бази даних або виконати запит.
+        Exception: Інші помилки, пов’язані з читанням файлів або доступом до бази даних.
+    """
     cash_path = os.path.normpath(os.path.abspath(cash_path))
     db_path = os.path.normpath(os.path.join(cash_path, "agent.db"))
     version = "Unknown"

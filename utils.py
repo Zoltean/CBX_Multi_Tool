@@ -7,17 +7,16 @@ import itertools
 import sys
 import subprocess
 from typing import List, Optional, Dict, Tuple
-
 import psutil
 from colorama import Fore, Style
 
 
 def run_spinner(message: str, duration: float = 2.0) -> None:
     """
-    Запускає спінер на заданий час із заданим повідомленням.
+    Запускає анімований спінер із повідомленням на заданий час.
 
     Args:
-        message (str): Повідомлення для спінера.
+        message (str): Повідомлення, яке відображається поряд зі спінером.
         duration (float): Тривалість роботи спінера в секундах.
     """
     stop_event = threading.Event()
@@ -28,6 +27,13 @@ def run_spinner(message: str, duration: float = 2.0) -> None:
     spinner_thread.join()
 
 def show_spinner(stop_event: threading.Event, message: str = "Processing") -> None:
+    """
+    Відображає анімований спінер у консолі до отримання сигналу зупинки.
+
+    Args:
+        stop_event (threading.Event): Подія для зупинки спінера.
+        message (str): Повідомлення, яке відображається поряд зі спінером.
+    """
     spinner = itertools.cycle(['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'])
     while not stop_event.is_set():
         sys.stdout.write(f"\r{Fore.CYAN}{message} {next(spinner)}{Style.RESET_ALL}")
@@ -46,18 +52,24 @@ def manage_process_lifecycle(
         spinner_duration: float = 1.0
 ) -> bool:
     """
-    Керує життєвим циклом процесів (зупинка, призупинення, відновлення).
+    Керує життєвим циклом процесів: зупиняє, призупиняє або відновлює їх.
 
     Args:
-        process_names: Список імен процесів для обробки.
-        target_dirs: Список директорій для перевірки процесів.
-        action: Дія ('terminate', 'suspend', 'resume').
-        prompt: Чи запитувати підтвердження у користувача.
-        spinner_message: Повідомлення для спінера (якщо None, спінер не запускається).
-        spinner_duration: Тривалість спінера.
+        process_names (List[str]): Список імен процесів для обробки.
+        target_dirs (List[str]): Список директорій для перевірки процесів.
+        action (str): Дія для виконання ('terminate', 'suspend', 'resume'). За замовчуванням 'terminate'.
+        prompt (bool): Чи запитувати підтвердження у користувача. За замовчуванням True.
+        spinner_message (Optional[str]): Повідомлення для спінера. Якщо None, спінер не відображається.
+        spinner_duration (float): Тривалість роботи спінера в секундах. За замовчуванням 1.0.
 
     Returns:
-        bool: True, якщо операція успішна, False інакше.
+        bool: True, якщо операція успішна, False у разі помилки.
+
+    Raises:
+        psutil.TimeoutExpired: Якщо процес не завершився вчасно.
+        psutil.NoSuchProcess: Якщо процес не існує.
+        psutil.AccessDenied: Якщо відсутні права доступу до процесу.
+        Exception: Інші непередбачені помилки.
     """
     success = True
     for target_dir in target_dirs:
@@ -107,10 +119,14 @@ def read_json_file(file_path: str) -> Optional[Dict]:
     Читає JSON-файл із обробкою помилок.
 
     Args:
-        file_path: Шлях до файлу.
+        file_path (str): Шлях до JSON-файлу.
 
     Returns:
-        Dict або None у разі помилки.
+        Optional[Dict]: Словник із даними або None у разі помилки.
+
+    Raises:
+        json.JSONDecodeError: Якщо файл містить некоректний JSON.
+        Exception: Інші помилки, такі як відсутність файлу або проблеми з доступом.
     """
     file_path = os.path.normpath(os.path.abspath(file_path))
     if not os.path.exists(file_path):
@@ -129,15 +145,18 @@ def read_json_file(file_path: str) -> Optional[Dict]:
 
 def write_json_file(file_path: str, data: Dict, indent: int = 4) -> bool:
     """
-    Записує дані в JSON-файл.
+    Записує дані у JSON-файл із форматуванням.
 
     Args:
-        file_path: Шлях до файлу.
-        data: Дані для запису.
-        indent: Відступ для форматування.
+        file_path (str): Шлях до файлу для запису.
+        data (Dict): Дані для запису у форматі словника.
+        indent (int): Рівень відступу для форматування JSON. За замовчуванням 4.
 
     Returns:
-        bool: True, якщо запис успішний, False інакше.
+        bool: True, якщо запис успішний, False у разі помилки.
+
+    Raises:
+        Exception: Помилки, такі як відсутність прав доступу або проблеми з файловою системою.
     """
     file_path = os.path.normpath(os.path.abspath(file_path))
     try:
@@ -152,13 +171,17 @@ def write_json_file(file_path: str, data: Dict, indent: int = 4) -> bool:
 
 def check_write_permissions(directory: str) -> bool:
     """
-    Перевіряє права запису в директорію.
+    Перевіряє наявність прав запису в указану директорію.
 
     Args:
-        directory: Шлях до директорії.
+        directory (str): Шлях до директорії для перевірки.
 
     Returns:
-        bool: True, якщо є права запису, False інакше.
+        bool: True, якщо є права запису, False у разі помилки.
+
+    Raises:
+        PermissionError: Якщо відсутні права запису.
+        Exception: Інші помилки, пов’язані з доступом до файлової системи.
     """
     directory = os.path.normpath(os.path.abspath(directory))
     try:
@@ -184,18 +207,21 @@ def launch_executable(
         command: Optional[str] = None
 ) -> bool:
     """
-    Запускає виконуваний файл із підтримкою різних режимів.
+    Запускає виконуваний файл із підтримкою різних режимів запуску.
 
     Args:
-        executable_name: Ім’я виконуваного файлу.
-        target_dir: Директорія, де розташований файл.
-        display_name: Назва для відображення в повідомленнях.
-        spinner_duration: Тривалість спінера.
-        shell: Чи використовувати shell-режим.
-        command: Кастомна команда (якщо None, формується стандартна).
+        executable_name (str): Ім’я виконуваного файлу.
+        target_dir (str): Директорія, де розташований файл.
+        display_name (str): Назва для відображення в повідомленнях.
+        spinner_duration (float): Тривалість роботи спінера в секундах. За замовчуванням 2.0.
+        shell (bool): Чи використовувати shell-режим для запуску. За замовчуванням False.
+        command (Optional[str]): Кастомна команда для запуску. Якщо None, формується стандартна.
 
     Returns:
-        bool: True, якщо запуск успішний, False інакше.
+        bool: True, якщо запуск успішний, False у разі помилки.
+
+    Raises:
+        Exception: Помилки, такі як відсутність файлу або проблеми з запуском процесу.
     """
     executable_path = os.path.normpath(os.path.join(target_dir, executable_name))
     if not os.path.exists(executable_path):
@@ -223,17 +249,20 @@ def display_list_and_choose(
         parent_menu: Optional[Dict] = None
 ) -> Optional[Tuple[int, Dict]]:
     """
-    Виводить список елементів і обробляє вибір користувача.
+    Відображає список елементів і дозволяє користувачу зробити вибір.
 
     Args:
-        title: Заголовок меню.
-        items: Список елементів для відображення.
-        display_key: Ключ для відображення назви елемента.
-        options: Додаткові опції (наприклад, '0': 'Back', 'Q': 'Exit').
-        parent_menu: Дані батьківського меню (для повернення).
+        title (str): Заголовок меню.
+        items (List[Dict]): Список елементів для відображення.
+        display_key (str): Ключ для відображення назви елемента.
+        options (Dict[str, str]): Додаткові опції меню (наприклад, '0': 'Назад'). За замовчуванням None.
+        parent_menu (Optional[Dict]): Дані батьківського меню для повернення. За замовчуванням None.
 
     Returns:
-        Tuple[int, Dict]: Індекс вибраного елемента та сам елемент, або None.
+        Optional[Tuple[int, Dict]]: Кортеж із індексом вибраного елемента та самим елементом, або None.
+
+    Raises:
+        ValueError: Якщо введено некоректний вибір.
     """
     while True:
         os.system("cls" if os.name == "nt" else "clear")
@@ -269,6 +298,15 @@ def display_list_and_choose(
             run_spinner("Invalid input", 2.0)
 
 def is_admin() -> bool:
+    """
+    Перевіряє, чи програма запущена з правами адміністратора.
+
+    Returns:
+        bool: True, якщо програма має права адміністратора, False інакше.
+
+    Raises:
+        Exception: Помилки, пов’язані з перевіркою прав доступу.
+    """
     try:
         return ctypes.windll.shell32.IsUserAnAdmin() != 0
     except Exception:
@@ -276,6 +314,19 @@ def is_admin() -> bool:
 
 
 def find_process_by_path(process_name: str, target_path: str) -> Optional[psutil.Process]:
+    """
+    Знаходить процес за ім’ям і шляхом до виконуваного файлу.
+
+    Args:
+        process_name (str): Ім’я процесу (наприклад, 'checkbox_kasa.exe').
+        target_path (str): Шлях до директорії, де розташований процес.
+
+    Returns:
+        Optional[psutil.Process]: Об’єкт процесу, якщо знайдено, або None.
+
+    Raises:
+        Exception: Помилки, пов’язані з доступом до процесів або їх пошуком.
+    """
     try:
         for proc in psutil.process_iter(['pid', 'name', 'exe']):
             if proc.info['name'].lower() == process_name.lower():
@@ -290,6 +341,18 @@ def find_process_by_path(process_name: str, target_path: str) -> Optional[psutil
 
 
 def find_all_processes_by_name(process_name: str) -> List[psutil.Process]:
+    """
+    Знаходить усі процеси за їх ім’ям.
+
+    Args:
+        process_name (str): Ім’я процесу для пошуку.
+
+    Returns:
+        List[psutil.Process]: Список знайдених процесів.
+
+    Raises:
+        Exception: Помилки, пов’язані з переглядом процесів.
+    """
     processes = []
     try:
         for proc in psutil.process_iter(['pid', 'name']):
@@ -302,6 +365,20 @@ def find_all_processes_by_name(process_name: str) -> List[psutil.Process]:
 
 def manage_processes(processes_to_kill: List[str], target_dirs: List[str],
                      stop_event: Optional[threading.Event] = None) -> bool:
+    """
+    Керує процесами: завершує їх із можливістю підтвердження користувачем.
+
+    Args:
+        processes_to_kill (List[str]): Список імен процесів для завершення.
+        target_dirs (List[str]): Список директорій для перевірки процесів.
+        stop_event (Optional[threading.Event]): Подія для зупинки моніторингу. За замовчуванням None.
+
+    Returns:
+        bool: True, якщо операція успішна, False у разі помилки.
+
+    Raises:
+        Exception: Помилки, пов’язані з завершенням процесів або доступом до них.
+    """
     try:
         if stop_event:
             while not stop_event.is_set():
@@ -372,20 +449,7 @@ def launch_executable(
         shell: bool = True,
         command: Optional[str] = None
 ) -> bool:
-    """
-    Запускає виконуваний файл із підтримкою різних режимів.
 
-    Args:
-        executable_name: Ім’я виконуваного файлу.
-        target_dir: Директорія, де розташований файл.
-        display_name: Назва для відображення в повідомленнях.
-        spinner_duration: Тривалість спінера.
-        shell: Чи використовувати shell-режим.
-        command: Кастомна команда (якщо None, формується стандартна).
-
-    Returns:
-        bool: True, якщо запуск успішний, False інакше.
-    """
     executable_path = os.path.normpath(os.path.join(target_dir, executable_name))
     if not os.path.exists(executable_path):
         print(f"{Fore.YELLOW}⚠ {executable_name} not found.{Style.RESET_ALL}")

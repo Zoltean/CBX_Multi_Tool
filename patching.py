@@ -15,6 +15,26 @@ from backup_restore import create_backup, restore_from_backup, delete_backup
 from search_utils import find_cash_registers_by_profiles_json, find_cash_registers_by_exe, get_cash_register_info, reset_cache
 
 def install_file(file_data: Dict, paylink_patch_data: Optional[Dict] = None, data: Optional[Dict] = None, expected_sha256: str = "") -> bool:
+    """
+    Встановлює файл із вказаного URL із можливістю оновлення PayLink.
+
+    Функція завантажує файл, перевіряє його SHA256-хеш (якщо надано), запускає інсталятор
+    і, якщо це PayLink, пропонує застосувати останній патч. Після встановлення може запустити
+    PayLink, якщо відповідний виконуваний файл знайдено.
+
+    Args:
+        file_data (Dict): Словник із даними файлу (name, url).
+        paylink_patch_data (Optional[Dict], optional): Дані для патча PayLink. Defaults to None.
+        data (Optional[Dict], optional): Дані API для доступу до патчів PayLink. Defaults to None.
+        expected_sha256 (str, optional): Очікуваний SHA256-хеш файлу. Defaults to "".
+
+    Returns:
+        bool: True, якщо встановлення успішне, False у разі помилки.
+
+    Raises:
+        FileNotFoundError: Якщо файл інсталятора не знайдено.
+        Exception: Інші помилки, такі як проблеми з мережею чи файловою системою.
+    """
     filename = file_data["name"]
     url = file_data["url"]
     print(f"{Fore.CYAN}📥 Preparing to install {filename}...{Style.RESET_ALL}")
@@ -96,6 +116,23 @@ def install_file(file_data: Dict, paylink_patch_data: Optional[Dict] = None, dat
         return False
 
 def extract_to_multiple_dirs(zip_ref: zipfile.ZipFile, target_dirs: List[str], total_files: int) -> None:
+    """
+    Розпаковує ZIP-архів у кілька цільових директорій.
+
+    Функція видаляє існуючі файли в цільових директоріях перед розпакуванням і відображає
+    прогрес за допомогою tqdm. Використовується для одночасного оновлення кількох профілів кас.
+
+    Args:
+        zip_ref (zipfile.ZipFile): Об’єкт ZIP-архіву.
+        target_dirs (List[str]): Список цільових директорій для розпакування.
+        total_files (int): Загальна кількість файлів у архіві.
+
+    Returns:
+        None
+
+    Raises:
+        Exception: Помилки, такі як PermissionError або проблеми з файловою системою.
+    """
     try:
         with tqdm(total=total_files * len(target_dirs), desc="Extracting to directories",
                   bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}]") as pbar:
@@ -110,12 +147,33 @@ def extract_to_multiple_dirs(zip_ref: zipfile.ZipFile, target_dirs: List[str], t
         print(f"{Fore.RED}✗ Extraction error: {e}{Style.RESET_ALL}")
         raise
 
-def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: bool = False,
+def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent:bool = False,
+
                is_paylink: bool = False, expected_sha256: str = "") -> bool:
     patch_file_name = patch_data["patch_name"]
     patch_url = patch_data["patch_url"]
     print(f"{Fore.CYAN}📥 Preparing to apply {patch_file_name}...{Style.RESET_ALL}")
+    """
+    Застосовує патч до вказаних профілів або директорій.
 
+    Функція завантажує патч, перевіряє його SHA256-хеш, створює резервну копію (за бажанням),
+    розпаковує файли патча в цільові директорії, контролює процеси та перезапускає програми
+    після оновлення. Для RRO-агентів дозволяє вибрати профіль або оновити всі профілі.
+    
+    Args:
+        patch_data (Dict): Словник із даними патча (patch_name, patch_url, sha256).
+        folder_name (str): Назва цільової папки (наприклад, "checkbox.kasa.manager").
+        data (Dict): Дані API для очищення або пошуку профілів.
+        is_rro_agent (bool, optional): Чи є цільовим RRO-агент. Defaults to False.
+        is_paylink (bool, optional): Чи є цільовим PayLink. Defaults to False.
+        expected_sha256 (str, optional): Очікуваний SHA256-хеш патча. Defaults to "".
+    
+    Returns:
+        bool: True, якщо оновлення успішне, False у разі помилки.
+    
+    Raises:
+        Exception: Помилки, такі як PermissionError, zipfile.BadZipFile або проблеми з мережею.
+    """
     try:
         if not download_file(patch_url, patch_file_name, expected_sha256=expected_sha256):
             if expected_sha256:

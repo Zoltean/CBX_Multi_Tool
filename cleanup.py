@@ -1,18 +1,36 @@
-# -*- coding: utf-8 -*-
 import os
 import subprocess
 import sys
-import time
 import threading
 from typing import Dict
-
 import psutil
 from tqdm import tqdm
 from colorama import Fore, Style
 
 from utils import find_all_processes_by_name, run_spinner
 
+
 def cleanup(data: Dict):
+    """
+    Виконує очищення файлів і процесів, пов'язаних із програмою, та готує її до завершення.
+
+    Функція сканує словник `data` для збору файлів, які потрібно видалити, перевіряє та завершує
+    відповідні процеси, видаляє файли, завершує активні потоки та створює BAT-скрипт для
+    самовидалення виконуваного файлу програми. У разі помилок виводить повідомлення та завершує
+    виконання.
+
+    Args:
+        data (Dict): Словник із даними, що містять категорії ("legacy", "dev", "tools") та
+                     інформацію про файли для видалення (імена та патчі).
+
+    Returns:
+        None: Функція не повертає значень, а завершує виконання програми за допомогою sys.exit(0).
+
+    Raises:
+        Exception: Загальні помилки, такі як PermissionError, psutil.AccessDenied або OSError,
+                   що можуть виникнути під час видалення файлів, завершення процесів або
+                   створення BAT-скрипту.
+    """
     print(f"{Fore.CYAN}🧹 Starting cleanup...{Style.RESET_ALL}")
     files_to_delete = []
 
@@ -63,7 +81,7 @@ def cleanup(data: Dict):
                 f"{Fore.CYAN}Do you want to terminate all found processes? (y/n): {Style.RESET_ALL}").strip().lower()
             if user_input != 'y':
                 print(f"{Fore.YELLOW}⚠ Skipping termination of all processes.{Style.RESET_ALL}")
-                processes = []  # Очистити список процесів, щоб пропустити завершення
+                processes = []
             else:
                 for file in files_to_delete:
                     process_name = os.path.splitext(os.path.basename(file))[0] + ".exe"

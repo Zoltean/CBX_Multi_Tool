@@ -3,4 +3,3 @@ psutil
 colorama
 tqdm
 ping3
-flask

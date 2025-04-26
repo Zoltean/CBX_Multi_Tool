@@ -9,7 +9,20 @@ from utils import run_spinner
 from config import VPS_VERSION_URL
 
 def calculate_file_hash(filepath: str) -> str:
-    """Вычисление SHA256 хэша файла."""
+    """
+    Обчислює SHA256-хеш файлу.
+
+    Функція зчитує файл поблочно та обчислює його SHA256-хеш для перевірки цілісності.
+
+    Args:
+        filepath (str): Шлях до файлу, для якого обчислюється хеш.
+
+    Returns:
+        str: Рядок із SHA256-хешем у нижньому регістрі або порожній рядок у разі помилки.
+
+    Raises:
+        Exception: Помилки, такі як FileNotFoundError або PermissionError, якщо файл недоступний.
+    """
     sha256_hash = hashlib.sha256()
     try:
         with open(filepath, "rb") as f:
@@ -21,6 +34,25 @@ def calculate_file_hash(filepath: str) -> str:
         return ""
 
 def check_for_updates() -> Tuple[bool, str, str]:
+    """
+    Перевіряє наявність оновлень програми, порівнюючи поточну версію з версією на сервері.
+
+    Функція звертається до API за URL із конфігурації, отримує дані про останню версію,
+    URL для завантаження та SHA256-хеш, і порівнює версію з поточною.
+
+    Args:
+        None
+
+    Returns:
+        Tuple[bool, str, str]: Кортеж, що містить:
+            - bool: Чи доступне оновлення (True, якщо є нова версія).
+            - str: URL для завантаження оновлення (або порожній рядок).
+            - str: SHA256-хеш оновлення (або порожній рядок).
+
+    Raises:
+        requests.RequestException: Якщо не вдалося виконати HTTP-запит.
+        Exception: Інші непередбачені помилки під час перевірки.
+    """
     print(f"{Fore.CYAN}🔍 Checking for updates...{Style.RESET_ALL}")
     try:
         response = requests.get(VPS_VERSION_URL, timeout=5)
@@ -48,6 +80,21 @@ def check_for_updates() -> Tuple[bool, str, str]:
         return False, "", ""
 
 def check_server_status(url: str) -> bool:
+    """
+    Перевіряє доступність сервера шляхом виконання пінгу.
+
+    Функція видаляє протокол і шлях із URL, виконує пінг до домену та визначає,
+    чи сервер доступний.
+
+    Args:
+        url (str): URL сервера для перевірки.
+
+    Returns:
+        bool: True, якщо сервер доступний, False у разі помилки або недоступності.
+
+    Raises:
+        Exception: Помилки, пов’язані з пінгуванням або обробкою URL.
+    """
     try:
         domain = url.replace("https://", "").replace("http://", "").split("/")[0]
         result = ping(domain, timeout=5)
@@ -65,6 +112,22 @@ def check_server_status(url: str) -> bool:
         return False
 
 def fetch_json(url: str) -> Optional[Dict]:
+    """
+    Отримує JSON-дані з вказаного URL.
+
+    Функція виконує HTTP GET-запит до сервера, отримує відповідь у форматі JSON
+    та повертає її як словник. Відображає прогрес із використанням tqdm.
+
+    Args:
+        url (str): URL для отримання JSON-даних.
+
+    Returns:
+        Optional[Dict]: Словник із даними або None у разі помилки.
+
+    Raises:
+        requests.RequestException: Якщо не вдалося виконати HTTP-запит.
+        Exception: Інші помилки, такі як некоректний JSON або серверна помилка.
+    """
     print(f"{Fore.CYAN}📡 Connecting to server...{Style.RESET_ALL}")
     try:
         with tqdm(total=100, desc="Fetching data", bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}") as pbar:
@@ -89,9 +152,31 @@ def fetch_json(url: str) -> Optional[Dict]:
         return None
 
 def download_file(url: str, filename: str, expected_sha256: str = "") -> bool:
+    """
+    Завантажує файл із вказаного URL із підтримкою докачки та перевіркою SHA256-хеша.
+
+    Функція перевіряє, чи файл уже існує, і якщо так, порівнює його хеш із очікуваним.
+    Якщо хеш не збігається або файл частково завантажений, продовжує завантаження з потрібного місця
+    за допомогою HTTP-заголовка Range. Виконує до трьох спроб завантаження у разі помилок мережі.
+    Прогрес відображається за допомогою tqdm.
+
+    Args:
+        url (str): URL для завантаження файлу.
+        filename (str): Ім'я файлу для збереження.
+        expected_sha256 (str, optional): Очікуваний SHA256-хеш файлу. Defaults to "".
+
+    Returns:
+        bool: True, якщо завантаження та перевірка успішні, False у разі помилки.
+
+    Raises:
+        requests.RequestException: Якщо не вдалося виконати HTTP-запит.
+        Exception: Інші помилки, такі як проблеми з файловою системою.
+    """
     print(f"{Fore.CYAN}📥 Preparing to download {filename}...{Style.RESET_ALL}")
     expected_sha256 = expected_sha256.lower() if expected_sha256 else ""
+
     try:
+        # Перевірка, чи файл уже існує
         if os.path.exists(filename):
             print(f"{Fore.YELLOW}⚠ {filename} already exists, checking hash...{Style.RESET_ALL}")
             if expected_sha256:
@@ -101,28 +186,51 @@ def download_file(url: str, filename: str, expected_sha256: str = "") -> bool:
                     run_spinner("Hash check completed", 1.0)
                     return True
                 else:
-                    print(f"{Fore.RED}✗ Hash mismatch: {filename} is corrupted. Redownloading...{Style.RESET_ALL}")
-                    os.remove(filename)
+                    print(f"{Fore.RED}✗ Hash mismatch: {filename} is corrupted. Checking for partial download...{Style.RESET_ALL}")
             else:
-                print(f"{Fore.YELLOW}⚠ No expected hash provided, skipping hash check.{Style.RESET_ALL}")
-                run_spinner("Hash check skipped", 1.0)
+                print(f"{Fore.YELLOW}⚠ No expected hash provided, checking for partial download...{Style.RESET_ALL}")
+
+        # Отримання розміру файлу на сервері
+        response = requests.head(url, timeout=10)
+        response.raise_for_status()
+        total_size = int(response.headers.get('content-length', 0)) or (55 * 1024 * 1024)  # Запасний розмір, якщо не вказано
+
+        # Перевірка розміру локального файлу для докачки
+        current_size = os.path.getsize(filename) if os.path.exists(filename) else 0
+
+        if current_size >= total_size and expected_sha256:
+            computed_hash = calculate_file_hash(filename)
+            if computed_hash == expected_sha256:
+                print(f"{Fore.GREEN}✓ File already fully downloaded and valid.{Style.RESET_ALL}")
+                run_spinner("Download completed", 1.0)
                 return True
+            else:
+                print(f"{Fore.RED}✗ Hash mismatch, restarting download...{Style.RESET_ALL}")
+                os.remove(filename)
+                current_size = 0
+        elif current_size > 0:
+            print(f"{Fore.YELLOW}⚠ Resuming download from {current_size} bytes...{Style.RESET_ALL}")
 
         max_retries = 3
         retry_delay = 5
         for attempt in range(max_retries):
             try:
-                with requests.get(url, stream=True, timeout=10) as r:
+                headers = {'Range': f'bytes={current_size}-'} if current_size > 0 else {}
+                with requests.get(url, stream=True, headers=headers, timeout=10) as r:
                     r.raise_for_status()
-                    total_size = int(r.headers.get('content-length', 0)) or (55 * 1024 * 1024)
-                    with open(filename, 'wb') as f:
-                        with tqdm(total=total_size, unit='B', unit_scale=True, desc="Downloading",
+                    # Оновлення розміру для докачки
+                    remaining_size = total_size - current_size
+                    with open(filename, 'ab' if current_size > 0 else 'wb') as f:
+                        with tqdm(total=total_size, initial=current_size, unit='B', unit_scale=True, desc="Downloading",
                                   bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}]") as pbar:
                             for chunk in r.iter_content(chunk_size=8192):
                                 f.write(chunk)
                                 pbar.update(len(chunk))
+                                current_size += len(chunk)
+
                 print(f"{Fore.GREEN}✓ Downloaded {filename} successfully!{Style.RESET_ALL}")
 
+                # Перевірка хеша після завантаження
                 if expected_sha256:
                     computed_hash = calculate_file_hash(filename)
                     if computed_hash == expected_sha256:
@@ -141,7 +249,7 @@ def download_file(url: str, filename: str, expected_sha256: str = "") -> bool:
 
             except requests.RequestException as e:
                 if attempt < max_retries - 1:
-                    print(f"{Fore.YELLOW}⚠ Download failed, retrying...{Style.RESET_ALL}")
+                    print(f"{Fore.YELLOW}⚠ Download failed, retrying in {retry_delay} seconds...{Style.RESET_ALL}")
                     run_spinner("Retrying download", retry_delay)
                 else:
                     print(f"{Fore.RED}✗ Download failed after {max_retries} attempts.{Style.RESET_ALL}")
@@ -153,6 +261,22 @@ def download_file(url: str, filename: str, expected_sha256: str = "") -> bool:
         return False
 
 def refresh_shift():
+    """
+
+    Функція запитує порт у користувача, формує URL для API касового апарата
+    та надсилає POST-запит для оновлення зміни.
+
+    Args:
+        None
+
+    Returns:
+        bool: True, якщо зміна успішно оновлена, False у разі помилки.
+
+    Raises:
+        ValueError: Якщо введено некоректний порт.
+        requests.RequestException: Якщо не вдалося виконати HTTP-запит.
+        Exception: Інші непередбачені помилки під час виконання запиту.
+    """
     print(f"{Fore.CYAN}🔄 Refreshing shift...{Style.RESET_ALL}")
     try:
         port = input(f"{Fore.CYAN}Enter cash register port: {Style.RESET_ALL}").strip()

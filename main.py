@@ -1,10 +1,5 @@
-import atexit
-import os
-import time
-import threading
-import platform
-from colorama import init, Fore, Style
 
+from colorama import init, Fore, Style
 from config import PROGRAM_TITLE, VPS_API_URL, VPS_CONFIG_URL
 from network import check_for_updates, fetch_json
 from menu import display_menu
@@ -14,6 +9,23 @@ from cleanup import cleanup
 init()
 
 def main():
+    """
+    Основна функція програми, що ініціалізує запуск та керує основним потоком виконання.
+
+    Функція відображає привітальне повідомлення, перевіряє права адміністратора, виконує перевірку
+    оновлень, отримує дані з віддаленого сервера, формує структуру меню та викликає функцію
+    відображення головного меню. У разі помилок виводить повідомлення та завершує виконання.
+
+    Args:
+        None
+
+    Returns:
+        None: Функція не повертає значень, керує виконанням програми та завершує її.
+
+    Raises:
+        Exception: Загальні помилки, такі як проблеми з мережею, доступом до файлів або
+                   несподівані помилки під час виконання.
+    """
     print(f"{Fore.CYAN}{'=' * 40}{Style.RESET_ALL}")
     print(f"{Fore.CYAN} Welcome to {PROGRAM_TITLE} {Style.RESET_ALL}")
     print(f"{Fore.CYAN}{'=' * 40}{Style.RESET_ALL}\n")

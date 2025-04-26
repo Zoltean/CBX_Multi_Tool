@@ -24,6 +24,32 @@ if sys.stderr.encoding != 'utf-8':
 
 def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Dict] = None,
                  update_available: bool = False, download_url: str = "", sha256: str = ""):
+    """
+    Відображає інтерактивне меню з опціями та обробляє вибір користувача.
+
+    Функція створює структуроване меню на основі переданих опцій, групуючи їх за категоріями
+    (Менеджери, каси, PayLink тощо), і дозволяє користувачу вибирати дії,
+    такі як встановлення файлів, застосування патчів, перевірка стану кас або вихід із програми.
+    Підтримує навігацію між меню, оновлення програми та очищення даних при виході.
+
+    Args:
+        title (str): Заголовок меню.
+        options (Dict): Словник із опціями меню, де ключі — назви категорій, а значення — списки
+                        або словники з даними.
+        data (Dict): Дані, отримані з API.
+        parent_menu (Optional[Dict], optional): Дані про батьківське меню для повернення назад.
+                                               Defaults to None.
+        update_available (bool, optional): Чи доступне оновлення програми. Defaults to False.
+        download_url (str, optional): URL для завантаження оновлення. Defaults to "".
+        sha256 (str, optional): SHA256-хеш оновлення для перевірки. Defaults to "".
+
+    Returns:
+        None: Функція не повертає значень, а керує інтерфейсом та завершує виконання при виході.
+
+    Raises:
+        Exception: Загальні помилки, такі як ValueError при некоректному введенні або проблеми
+                   з мережею чи файловою системою.
+    """
     while True:
         try:
             os.system("cls")

@@ -1,15 +1,10 @@
-import json
 import os
-import subprocess
 import requests
 from typing import Dict
-
-import psutil
 from colorama import Fore, Style, init
 from config import DRIVES
 from utils import (
-    run_spinner, find_process_by_path, find_all_processes_by_name,
-    launch_executable, manage_process_lifecycle, read_json_file, write_json_file
+    run_spinner, launch_executable, manage_process_lifecycle, read_json_file, write_json_file
 )
 from cleanup import cleanup
 from search_utils import (
@@ -19,7 +14,28 @@ from search_utils import (
 
 init(autoreset=True)
 
+
 def check_cash_profiles(data: Dict):
+    """
+    Перевіряє стан кас та надає інтерфейс для їх управління.
+
+    Функція шукає каси у файлі профілів у profiles.json та виконуваних файлів,
+    відображає їхній стан (здоров’я БД, статус транзакцій, зміни, версію) і дозволяє користувачу
+    виконувати дії, такі як запуск каси, відкриття теки профілю, оновлення кредів (ключ ліцензії, ПІН-код),
+    відправка POST запиту на ендпоїнт /api/v1/shift/refresh. Використовує кеш для оптимізації пошуку.
+
+    Args:
+        data (Dict): Словник із даними, які передаються для очищення при виході з програми.
+
+    Returns:
+        None: Функція не повертає значень, а керує інтерфейсом та завершує виконання при виборі виходу.
+
+    Raises:
+        ValueError: Якщо введено некоректний номер профілю або формат команди.
+        requests.RequestException: Якщо не вдалося виконати HTTP-запит для shift/refresh.
+        Exception: Загальні помилки, такі як PermissionError або OSError, що можуть виникнути
+                   під час роботи з файлами, процесами або мережею.
+    """
     cache_valid = False
     while True:
         os.system("cls" if os.name == "nt" else "clear")
@@ -262,6 +278,7 @@ def check_cash_profiles(data: Dict):
             run_spinner("Error occurred", 2.0)
             input(f"{Fore.CYAN}Press Enter to continue...{Style.RESET_ALL}")
             return
+
 
 if __name__ == "__main__":
     data = {}

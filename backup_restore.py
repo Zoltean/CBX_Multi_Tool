@@ -3,16 +3,29 @@ import zipfile
 import shutil
 from datetime import datetime
 from typing import Optional
-
-import psutil
 from tqdm import tqdm
 from colorama import Fore, Style
 
-from utils import find_process_by_path, find_all_processes_by_name, launch_executable, manage_process_lifecycle, \
+from utils import find_all_processes_by_name, launch_executable, manage_process_lifecycle, \
     run_spinner
 
 
 def create_backup(target_dir: str) -> Optional[str]:
+    """
+    Створює резервну копію вмісту вказаної директорії у форматі ZIP.
+
+    Функція архівує всі файли та піддиректорії вказаної директорії, створюючи ZIP-файл із назвою,
+    що включає базове ім'я директорії та позначку часу. Прогрес архівації відображається за допомогою tqdm.
+
+    Args:
+        target_dir (str): Шлях до директорії, яку потрібно заархівувати.
+
+    Returns:
+        Optional[str]: Шлях до створеного ZIP-файлу або None у разі помилки.
+
+    Raises:
+        Exception: Загальні помилки, такі як PermissionError або OSError, якщо архівація не вдалася.
+    """
     print(f"{Fore.CYAN}📦 Creating backup for {os.path.basename(target_dir)}...{Style.RESET_ALL}")
     backup_name = f"{os.path.basename(target_dir)}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
     backup_path = os.path.join(os.path.dirname(target_dir), backup_name)
@@ -38,6 +51,21 @@ def create_backup(target_dir: str) -> Optional[str]:
 
 
 def delete_backup(backup_path: str) -> bool:
+    """
+    Видаляє вказаний файл резервної копії.
+
+    Функція намагається видалити ZIP-файл резервної копії за вказаним шляхом. У разі успіху
+    повертається True, у разі помилки — False.
+
+    Args:
+        backup_path (str): Шлях до ZIP-файлу резервної копії.
+
+    Returns:
+        bool: True, якщо файл успішно видалено, False у разі помилки.
+
+    Raises:
+        Exception: Помилки, такі як PermissionError або OSError, якщо файл не вдається видалити.
+    """
     print(f"{Fore.CYAN}🗑 Deleting backup {os.path.basename(backup_path)}...{Style.RESET_ALL}")
     try:
         os.remove(backup_path)
@@ -52,6 +80,26 @@ def delete_backup(backup_path: str) -> bool:
 
 def restore_from_backup(target_dir: str, backup_path: str, is_rro_agent: bool = False,
                         is_paylink: bool = False) -> bool:
+    """
+    Відновлює вміст директорії з резервної копії у форматі ZIP.
+
+    Функція зупиняє відповідні процеси, очищає цільову директорію, розпаковує файли з архіву
+    та запускає необхідні програми після відновлення. Якщо це RRO-агент, також призупиняються
+    та відновлюються процеси менеджера.
+
+    Args:
+        target_dir (str): Шлях до директорії, куди буде відновлено вміст.
+        backup_path (str): Шлях до ZIP-файлу резервної копії.
+        is_rro_agent (bool, optional): Чи є цільовим RRO-агент. Defaults to False.
+        is_paylink (bool, optional): Чи є цільовим PayLink. Defaults to False.
+
+    Returns:
+        bool: True, якщо відновлення успішне, False у разі помилки.
+
+    Raises:
+        Exception: Помилки, такі як PermissionError, zipfile.BadZipFile або OSError, якщо
+                  відновлення не вдалося.
+    """
     print(f"{Fore.CYAN}🔄 Restoring backup {os.path.basename(backup_path)}...{Style.RESET_ALL}")
 
     processes_to_check = ["checkbox_kasa.exe"] if is_rro_agent else (
