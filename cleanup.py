@@ -115,7 +115,7 @@ def cleanup(data: Dict):
         with open(bat_path, "w", encoding="utf-8") as bat_file:
             bat_file.write(f"@echo off\n")
             bat_file.write(f":repeat\n")
-            bat_file.write(f"ping 127.0.0.1 -n 3 >nul\n")
+            bat_file.write(f"ping 127.0.0.1 -n 1 >nul\n")
             bat_file.write(f"del /f /q \"{exe_path}\"\n")
             bat_file.write(f"if exist \"{exe_path}\" goto repeat\n")
             bat_file.write(f"del /f /q \"{bat_path}\"\n")
