@@ -10,7 +10,7 @@ import psutil
 from tqdm import tqdm
 from colorama import Fore, Style
 
-from utils import find_all_processes_by_name, show_spinner
+from utils import find_all_processes_by_name, run_spinner
 
 def cleanup(data: Dict):
     print(f"{Fore.CYAN}🧹 Starting cleanup...{Style.RESET_ALL}")
@@ -72,12 +72,7 @@ def cleanup(data: Dict):
                         try:
                             proc.kill()
                             print(f"{Fore.GREEN}✓ Stopped {process_name} (PID: {proc.pid}).{Style.RESET_ALL}")
-                            stop_event = threading.Event()
-                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process stopped"))
-                            spinner_thread.start()
-                            time.sleep(0.5)
-                            stop_event.set()
-                            spinner_thread.join()
+                            run_spinner("Process stopped", 0.5)
                         except psutil.NoSuchProcess:
                             pass
                         except psutil.AccessDenied:

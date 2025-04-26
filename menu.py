@@ -12,7 +12,7 @@ from colorama import init, Fore, Style
 
 from config import PROGRAM_TITLE, VPS_API_URL, DRIVES
 from network import check_for_updates, fetch_json, refresh_shift
-from utils import is_admin, show_spinner, find_all_processes_by_name, find_process_by_path
+from utils import is_admin, run_spinner, find_all_processes_by_name, find_process_by_path
 from cleanup import cleanup
 from patching import install_file, patch_file
 from health_check import check_cash_profiles
@@ -78,12 +78,7 @@ def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Di
 
             if not ordered_items:
                 print(f"{Fore.RED}✗ No options available.{Style.RESET_ALL}")
-                stop_event = threading.Event()
-                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "No options"))
-                spinner_thread.start()
-                time.sleep(2)
-                stop_event.set()
-                spinner_thread.join()
+                run_spinner("No options", 2.0)
                 return
 
             current_index = 1
@@ -202,12 +197,7 @@ def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Di
                     print(f"{Fore.GREEN}✓ Update downloaded and verified successfully!{Style.RESET_ALL}")
                 else:
                     print(f"{Fore.RED}✗ Failed to download or verify update.{Style.RESET_ALL}")
-                stop_event = threading.Event()
-                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update processed"))
-                spinner_thread.start()
-                time.sleep(2)
-                stop_event.set()
-                spinner_thread.join()
+                run_spinner("Update processed", 2.0)
                 continue
 
             try:
@@ -232,28 +222,13 @@ def display_menu(title: str, options: Dict, data: Dict, parent_menu: Optional[Di
                                      update_available=update_available, download_url=download_url, sha256=sha256)
                 else:
                     print(f"{Fore.RED}✗ Invalid option!{Style.RESET_ALL}")
-                    stop_event = threading.Event()
-                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid option"))
-                    spinner_thread.start()
-                    time.sleep(2)
-                    stop_event.set()
-                    spinner_thread.join()
+                    run_spinner("Invalid option", 2.0)
             except ValueError:
                 print(f"{Fore.RED}✗ Invalid input!{Style.RESET_ALL}")
-                stop_event = threading.Event()
-                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid input"))
-                spinner_thread.start()
-                time.sleep(2)
-                stop_event.set()
-                spinner_thread.join()
+                run_spinner("Invalid input", 2.0)
         except Exception as e:
             print(f"{Fore.RED}✗ Menu error: {e}{Style.RESET_ALL}")
-            stop_event = threading.Event()
-            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Menu error"))
-            spinner_thread.start()
-            time.sleep(2)
-            stop_event.set()
-            spinner_thread.join()
+            run_spinner("Menu error", 2.0)
 
 if __name__ == "__main__":
     from main import main

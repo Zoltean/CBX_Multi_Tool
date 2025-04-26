@@ -37,7 +37,6 @@ def show_spinner(stop_event: threading.Event, message: str = "Processing") -> No
     sys.stdout.flush()
 
 
-
 def manage_process_lifecycle(
         process_names: List[str],
         target_dirs: List[str],
@@ -339,13 +338,7 @@ def manage_processes(processes_to_kill: List[str], target_dirs: List[str],
                                 try:
                                     process.terminate()
                                     print(f"{Fore.GREEN}✓ Terminated {proc_name}.{Style.RESET_ALL}")
-                                    stop_event = threading.Event()
-                                    spinner_thread = threading.Thread(target=show_spinner,
-                                                                      args=(stop_event, "Terminating process"))
-                                    spinner_thread.start()
-                                    time.sleep(1)
-                                    stop_event.set()
-                                    spinner_thread.join()
+                                    run_spinner("Terminating process", 1.0)
                                 except psutil.NoSuchProcess:
                                     pass
                                 except Exception:
@@ -360,13 +353,7 @@ def manage_processes(processes_to_kill: List[str], target_dirs: List[str],
                             try:
                                 process.terminate()
                                 print(f"{Fore.GREEN}✓ Terminated {proc_name}.{Style.RESET_ALL}")
-                                stop_event = threading.Event()
-                                spinner_thread = threading.Thread(target=show_spinner,
-                                                                  args=(stop_event, "Terminating process"))
-                                spinner_thread.start()
-                                time.sleep(1)
-                                stop_event.set()
-                                spinner_thread.join()
+                                run_spinner("Terminating process", 1.0)
                             except psutil.NoSuchProcess:
                                 pass
                             except Exception:

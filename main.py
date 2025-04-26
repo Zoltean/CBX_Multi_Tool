@@ -8,7 +8,7 @@ from colorama import init, Fore, Style
 from config import PROGRAM_TITLE, VPS_API_URL, VPS_CONFIG_URL
 from network import check_for_updates, fetch_json
 from menu import display_menu
-from utils import is_admin, show_spinner
+from utils import is_admin, run_spinner
 from cleanup import cleanup
 
 init()
@@ -21,12 +21,7 @@ def main():
     try:
         if not is_admin():
             print(f"{Fore.YELLOW}⚠ Please run as administrator for full functionality.{Style.RESET_ALL}")
-            stop_event = threading.Event()
-            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Checking permissions"))
-            spinner_thread.start()
-            time.sleep(3)
-            stop_event.set()
-            spinner_thread.join()
+            run_spinner("Checking permissions", 3.0)
         else:
             print(f"{Fore.GREEN}✓ Admin privileges confirmed.{Style.RESET_ALL}")
 

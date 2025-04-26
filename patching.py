@@ -9,7 +9,7 @@ from tqdm import tqdm
 from colorama import Fore, Style
 import psutil
 from config import DRIVES
-from utils import find_process_by_path, find_all_processes_by_name, manage_processes, show_spinner, launch_executable
+from utils import find_process_by_path, find_all_processes_by_name, manage_processes, run_spinner, launch_executable
 from network import download_file
 from backup_restore import create_backup, restore_from_backup, delete_backup
 from search_utils import find_cash_registers_by_profiles_json, find_cash_registers_by_exe, get_cash_register_info, reset_cache
@@ -40,12 +40,7 @@ def install_file(file_data: Dict, paylink_patch_data: Optional[Dict] = None, dat
         cmd = f'start "" "{full_path}"'
         subprocess.Popen(cmd, shell=True, cwd=os.path.dirname(full_path))
 
-        stop_event = threading.Event()
-        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Starting installation"))
-        spinner_thread.start()
-        time.sleep(1)
-        stop_event.set()
-        spinner_thread.join()
+        run_spinner("Starting installation", 1.0)
 
         print(f"{Fore.GREEN}✓ Installation started successfully!{Style.RESET_ALL}")
 
@@ -89,30 +84,15 @@ def install_file(file_data: Dict, paylink_patch_data: Optional[Dict] = None, dat
                                 print(f"{Fore.YELLOW}⚠ PayLink executable not found.{Style.RESET_ALL}")
                         else:
                             print(f"{Fore.YELLOW}⚠ PayLink directory not found.{Style.RESET_ALL}")
-                        stop_event = threading.Event()
-                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update completed"))
-                        spinner_thread.start()
-                        time.sleep(2)
-                        stop_event.set()
-                        spinner_thread.join()
+                        run_spinner("Update completed", 2.0)
                     else:
                         print(f"{Fore.GREEN}✓ Update skipped.{Style.RESET_ALL}")
-                        stop_event = threading.Event()
-                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update skipped"))
-                        spinner_thread.start()
-                        time.sleep(1)
-                        stop_event.set()
-                        spinner_thread.join()
+                        run_spinner("Update skipped", 1.0)
 
         return True
     except Exception as e:
         print(f"{Fore.RED}✗ Installation failed: {e}{Style.RESET_ALL}")
-        stop_event = threading.Event()
-        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Installation failed"))
-        spinner_thread.start()
-        time.sleep(2)
-        stop_event.set()
-        spinner_thread.join()
+        run_spinner("Installation failed", 2.0)
         return False
 
 def extract_to_multiple_dirs(zip_ref: zipfile.ZipFile, target_dirs: List[str], total_files: int) -> None:
@@ -161,12 +141,7 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
 
         if not install_dir:
             print(f"{Fore.RED}✗ {target_folder} not found on any drive.{Style.RESET_ALL}")
-            stop_event = threading.Event()
-            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Directory not found"))
-            spinner_thread.start()
-            time.sleep(2)
-            stop_event.set()
-            spinner_thread.join()
+            run_spinner("Directory not found", 2.0)
             return False
 
         try:
@@ -176,21 +151,11 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
             os.remove(test_file)
         except PermissionError:
             print(f"{Fore.RED}✗ No write permissions for {install_dir}. Please run as administrator.{Style.RESET_ALL}")
-            stop_event = threading.Event()
-            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Permission error"))
-            spinner_thread.start()
-            time.sleep(2)
-            stop_event.set()
-            spinner_thread.join()
+            run_spinner("Permission error", 2.0)
             return False
         except Exception as e:
             print(f"{Fore.RED}✗ Permission check failed: {e}{Style.RESET_ALL}")
-            stop_event = threading.Event()
-            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Permission error"))
-            spinner_thread.start()
-            time.sleep(2)
-            stop_event.set()
-            spinner_thread.join()
+            run_spinner("Permission error", 2.0)
             return False
 
         print(f"{Fore.GREEN}✓ Found installation directory: {install_dir}{Style.RESET_ALL}")
@@ -199,9 +164,7 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
             profiles_info = []
             manager_dir = install_dir
 
-            stop_event = threading.Event()
-            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Searching cash registers"))
-            spinner_thread.start()
+            run_spinner("Searching cash registers", 2.0)
 
             reset_cache()
             if manager_dir:
@@ -234,17 +197,9 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                             if profile_info:
                                 profiles_info.append(profile_info)
 
-            stop_event.set()
-            spinner_thread.join()
-
             if not profiles_info:
                 print(f"{Fore.RED}✗ No profiles found in {install_dir}.{Style.RESET_ALL}")
-                stop_event = threading.Event()
-                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "No profiles"))
-                spinner_thread.start()
-                time.sleep(2)
-                stop_event.set()
-                spinner_thread.join()
+                run_spinner("No profiles", 2.0)
                 return False
 
             while True:
@@ -308,47 +263,22 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                                 if restore_from_backup(target_dir, backup_path, is_rro_agent=is_rro_agent,
                                                        is_paylink=is_paylink):
                                     print(f"{Fore.GREEN}✓ Profile {os.path.basename(target_dir)} restored.{Style.RESET_ALL}")
-                                    stop_event = threading.Event()
-                                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Restore completed"))
-                                    spinner_thread.start()
-                                    time.sleep(1)
-                                    stop_event.set()
-                                    spinner_thread.join()
+                                    run_spinner("Restore completed", 1.0)
                                 else:
                                     print(f"{Fore.RED}✗ Restore failed.{Style.RESET_ALL}")
                                     input("Press Enter to continue...")
                             else:
                                 print(f"{Fore.RED}✗ Target directory not found for backup.{Style.RESET_ALL}")
-                                stop_event = threading.Event()
-                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Directory not found"))
-                                spinner_thread.start()
-                                time.sleep(2)
-                                stop_event.set()
-                                spinner_thread.join()
+                                run_spinner("Directory not found", 2.0)
                         else:
                             print(f"{Fore.RED}✗ Invalid backup selection.{Style.RESET_ALL}")
-                            stop_event = threading.Event()
-                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid selection"))
-                            spinner_thread.start()
-                            time.sleep(2)
-                            stop_event.set()
-                            spinner_thread.join()
+                            run_spinner("Invalid selection", 2.0)
                     except ValueError:
                         print(f"{Fore.RED}✗ Invalid backup input.{Style.RESET_ALL}")
-                        stop_event = threading.Event()
-                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid input"))
-                        spinner_thread.start()
-                        time.sleep(2)
-                        stop_event.set()
-                        spinner_thread.join()
+                        run_spinner("Invalid input", 2.0)
                     except Exception as e:
                         print(f"{Fore.RED}✗ Restore error: {e}{Style.RESET_ALL}")
-                        stop_event = threading.Event()
-                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Restore error"))
-                        spinner_thread.start()
-                        time.sleep(2)
-                        stop_event.set()
-                        spinner_thread.join()
+                        run_spinner("Restore error", 2.0)
                     continue
 
                 if choice.lower().startswith("d") and len(choice) > 1:
@@ -358,71 +288,36 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                             backup_path = os.path.join(profiles_dir, backup_files[backup_idx])
                             if delete_backup(backup_path):
                                 print(f"{Fore.GREEN}✓ Backup deleted.{Style.RESET_ALL}")
-                                stop_event = threading.Event()
-                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Backup deleted"))
-                                spinner_thread.start()
-                                time.sleep(1)
-                                stop_event.set()
-                                spinner_thread.join()
+                                run_spinner("Backup deleted", 1.0)
                             else:
                                 print(f"{Fore.RED}✗ Failed to delete backup.{Style.RESET_ALL}")
                                 input("Press Enter to continue...")
                         else:
                             print(f"{Fore.RED}✗ Invalid delete selection.{Style.RESET_ALL}")
-                            stop_event = threading.Event()
-                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid selection"))
-                            spinner_thread.start()
-                            time.sleep(2)
-                            stop_event.set()
-                            spinner_thread.join()
+                            run_spinner("Invalid selection", 2.0)
                     except ValueError:
                         print(f"{Fore.RED}✗ Invalid delete input.{Style.RESET_ALL}")
-                        stop_event = threading.Event()
-                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid input"))
-                        spinner_thread.start()
-                        time.sleep(2)
-                        stop_event.set()
-                        spinner_thread.join()
+                        run_spinner("Invalid input", 2.0)
                     except Exception as e:
                         print(f"{Fore.RED}✗ Delete error: {e}{Style.RESET_ALL}")
-                        stop_event = threading.Event()
-                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Delete error"))
-                        spinner_thread.start()
-                        time.sleep(2)
-                        stop_event.set()
-                        spinner_thread.join()
+                        run_spinner("Delete error", 2.0)
                     continue
 
                 try:
                     choice_int = int(choice)
                     if choice_int == 0:
                         print(f"{Fore.GREEN}✓ Returning to previous menu...{Style.RESET_ALL}")
-                        stop_event = threading.Event()
-                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Returning"))
-                        spinner_thread.start()
-                        time.sleep(1)
-                        stop_event.set()
-                        spinner_thread.join()
+                        run_spinner("Returning", 1.0)
                         return False
                     elif 1 <= choice_int <= len(profiles_info):
                         selected_profile = profiles_info[choice_int - 1]
                         if selected_profile is None:
                             print(f"{Fore.RED}✗ Selected profile is invalid.{Style.RESET_ALL}")
-                            stop_event = threading.Event()
-                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid profile"))
-                            spinner_thread.start()
-                            time.sleep(2)
-                            stop_event.set()
-                            spinner_thread.join()
+                            run_spinner("Invalid profile", 2.0)
                             continue
                         if selected_profile["health"] == "BAD":
                             print(f"{Fore.RED}✗ Cannot update {selected_profile['name']}: Database corrupted.{Style.RESET_ALL}")
-                            stop_event = threading.Event()
-                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update cancelled"))
-                            spinner_thread.start()
-                            time.sleep(2)
-                            stop_event.set()
-                            spinner_thread.join()
+                            run_spinner("Update cancelled", 2.0)
                             continue
                         target_dirs = [selected_profile["path"]]
                         break
@@ -430,31 +325,16 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                         valid_profiles = [p for p in profiles_info if p is not None and p["health"] != "BAD"]
                         if not valid_profiles:
                             print(f"{Fore.RED}✗ No valid profiles available for update.{Style.RESET_ALL}")
-                            stop_event = threading.Event()
-                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update cancelled"))
-                            spinner_thread.start()
-                            time.sleep(2)
-                            stop_event.set()
-                            spinner_thread.join()
+                            run_spinner("Update cancelled", 2.0)
                             return False
                         target_dirs = [profile["path"] for profile in valid_profiles]
                         break
                     else:
                         print(f"{Fore.RED}✗ Invalid choice.{Style.RESET_ALL}")
-                        stop_event = threading.Event()
-                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid choice"))
-                        spinner_thread.start()
-                        time.sleep(2)
-                        stop_event.set()
-                        spinner_thread.join()
+                        run_spinner("Invalid choice", 2.0)
                 except ValueError:
                     print(f"{Fore.RED}✗ Invalid input.{Style.RESET_ALL}")
-                    stop_event = threading.Event()
-                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid input"))
-                    spinner_thread.start()
-                    time.sleep(2)
-                    stop_event.set()
-                    spinner_thread.join()
+                    run_spinner("Invalid input", 2.0)
 
             for target_dir in target_dirs:
                 choice = input(
@@ -463,12 +343,7 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                     backup_path = create_backup(target_dir)
                     if not backup_path:
                         print(f"{Fore.RED}✗ Backup failed. Continuing without backup...{Style.RESET_ALL}")
-                        stop_event = threading.Event()
-                        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Backup failed"))
-                        spinner_thread.start()
-                        time.sleep(2)
-                        stop_event.set()
-                        spinner_thread.join()
+                        run_spinner("Backup failed", 2.0)
                 else:
                     print(f"{Fore.GREEN}✓ Backup skipped.{Style.RESET_ALL}")
 
@@ -495,12 +370,7 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                             try:
                                 proc.terminate()
                                 print(f"{Fore.GREEN}✓ Terminated checkbox_kasa.exe (PID: {proc.pid}).{Style.RESET_ALL}")
-                                stop_event = threading.Event()
-                                spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process terminated"))
-                                spinner_thread.start()
-                                time.sleep(1)
-                                stop_event.set()
-                                spinner_thread.join()
+                                run_spinner("Process terminated", 1.0)
                             except psutil.NoSuchProcess:
                                 pass
                             except Exception:
@@ -508,12 +378,7 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                     time.sleep(1)
                 else:
                     print(f"{Fore.RED}✗ Update cancelled.{Style.RESET_ALL}")
-                    stop_event = threading.Event()
-                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update cancelled"))
-                    spinner_thread.start()
-                    time.sleep(2)
-                    stop_event.set()
-                    spinner_thread.join()
+                    run_spinner("Update cancelled", 2.0)
                     return False
 
                 if manager_running:
@@ -522,12 +387,7 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                         try:
                             proc.suspend()
                             print(f"{Fore.GREEN}✓ Paused kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
-                            stop_event = threading.Event()
-                            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process paused"))
-                            spinner_thread.start()
-                            time.sleep(1)
-                            stop_event.set()
-                            spinner_thread.join()
+                            run_spinner("Process paused", 1.0)
                         except psutil.NoSuchProcess:
                             pass
                         except Exception:
@@ -575,30 +435,15 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
             print(f"{Fore.GREEN}✓ Files updated successfully in {', '.join(target_dirs)}!{Style.RESET_ALL}")
         except PermissionError:
             print(f"{Fore.RED}✗ Permission denied. Please close applications or run as administrator.{Style.RESET_ALL}")
-            stop_event = threading.Event()
-            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Permission error"))
-            spinner_thread.start()
-            time.sleep(2)
-            stop_event.set()
-            spinner_thread.join()
+            run_spinner("Permission error", 2.0)
             return False
         except zipfile.BadZipFile:
             print(f"{Fore.RED}✗ Invalid update file.{Style.RESET_ALL}")
-            stop_event = threading.Event()
-            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Invalid file"))
-            spinner_thread.start()
-            time.sleep(2)
-            stop_event.set()
-            spinner_thread.join()
+            run_spinner("Invalid file", 2.0)
             return False
         except Exception as e:
             print(f"{Fore.RED}✗ Update error: {e}{Style.RESET_ALL}")
-            stop_event = threading.Event()
-            spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update error"))
-            spinner_thread.start()
-            time.sleep(2)
-            stop_event.set()
-            spinner_thread.join()
+            run_spinner("Update error", 2.0)
             return False
         finally:
             stop_monitoring.set()
@@ -640,30 +485,15 @@ def patch_file(patch_data: Dict, folder_name: str, data: Dict, is_rro_agent: boo
                 try:
                     proc.resume()
                     print(f"{Fore.GREEN}✓ Resumed kasa_manager.exe (PID: {proc.pid}).{Style.RESET_ALL}")
-                    stop_event = threading.Event()
-                    spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Process resumed"))
-                    spinner_thread.start()
-                    time.sleep(1)
-                    stop_event.set()
-                    spinner_thread.join()
+                    run_spinner("Process resumed", 1.0)
                 except psutil.NoSuchProcess:
                     print(f"{Fore.YELLOW}⚠ kasa_manager.exe (PID: {proc.pid}) already terminated.{Style.RESET_ALL}")
                 except Exception as e:
                     print(f"{Fore.RED}✗ Failed to resume kasa_manager.exe: {e}{Style.RESET_ALL}")
 
-        stop_event = threading.Event()
-        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update completed"))
-        spinner_thread.start()
-        time.sleep(1)
-        stop_event.set()
-        spinner_thread.join()
+        run_spinner("Update completed", 1.0)
         return True
     except Exception as e:
         print(f"{Fore.RED}✗ Update error: {e}{Style.RESET_ALL}")
-        stop_event = threading.Event()
-        spinner_thread = threading.Thread(target=show_spinner, args=(stop_event, "Update error"))
-        spinner_thread.start()
-        time.sleep(2)
-        stop_event.set()
-        spinner_thread.join()
+        run_spinner("Update error", 2.0)
         return False
